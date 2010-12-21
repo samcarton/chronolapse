@@ -17,15 +17,22 @@
 
     @change: 1.0.1
         - fixed outputting video to path with spaces - used a bit of a hack for mencoder to work -- issue 1
+    @change: 1.0.2
+        - removed short sighted dependence on kml.pyc
+        - added -a flag for autostarting
+        - added minimizing to tray option
+        - added rotate option and changed resize tab to adjust tab
 """
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 
 import wx, time, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2
-
-from kml import *
-
 from PIL import Image
+
+try:
+    from agw import knobctrl as KC
+except ImportError: # if it's not there locally, try the wxPython lib.
+    import wx.lib.agw.knobctrl as KC
 
 try:
     from VideoCapture import Device
@@ -193,15 +200,19 @@ class ChronoFrame(chronoFrame):
         self.NORMAL = 0
         self.VERBOSE = 1
         self.DEBUG = 2
-        # get verbosity from command line
+        # get command line options
         self.verbosity = self.NORMAL
+        self.autostart = False
         try:
-            optlist, args = getopt.getopt(sys.argv[1:], 'vq')
+            optlist, args = getopt.getopt(sys.argv[1:], 'vqa')
             for opt in optlist:
                 if opt[0] == '-v':
                     self.verbosity = max(0, min( 2, self.verbosity + 1) )
                 elif opt[0] == '-q':
                     self.verbosity = max(0, min( 2, self.verbosity - 1) )
+                elif opt[0] == '-a':
+                    self.autostart = True
+                    self.debug('Autostarting', self.VERBOSE)
 
             if self.verbosity == self.VERBOSE:
                 self.debug("Verbosity set to: VERBOSE", self.VERBOSE)
@@ -212,6 +223,13 @@ class ChronoFrame(chronoFrame):
 
         if os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico')):
             self.SetIcon(wx.Icon(os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico'), wx.BITMAP_TYPE_ICO))
+        else:
+            self.debug( 'Could not find %s' % os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico'))
+
+         # set X to close to taskbar -- windows only
+        # http://code.activestate.com/recipes/475155/
+        self.TBFrame = TaskBarFrame(None, self, -1, " ", self.CHRONOLAPSEPATH)
+        self.TBFrame.Show(False)
 
         # option defaults
         self.options = {
@@ -265,6 +283,10 @@ class ChronoFrame(chronoFrame):
         # check version
         self.checkVersion()
 
+        # autostart
+        if self.autostart:
+            self.startCapturePressed(None)
+
     def debug(self, message, verbosity=-1):
         # set default
         if verbosity == -1:
@@ -276,6 +298,12 @@ class ChronoFrame(chronoFrame):
     def OnClose(self, event):
         # save config before closing
         self.saveConfig()
+
+        try:
+            if hasattr(self, 'TBFrame') and self.TBFrame:
+                self.TBFrame.kill(event)
+        except:
+            pass
 
         event.Skip()
 
@@ -370,6 +398,12 @@ class ChronoFrame(chronoFrame):
                 self.resizeheighttext.SetValue(config['resizeheight'])
                 self.resizesourcetext.SetValue(config['resizesourcefolder'])
                 self.resizeoutputtext.SetValue(config['resizeoutputfolder'])
+
+                for opt in self.rotatecombo.GetStrings():
+                    if opt == config['rotateangle']:
+                        self.rotatecombo.SetValue(opt)
+                        break
+
             except Exception, e:
                 self.debug(str(e))
 
@@ -489,6 +523,7 @@ class ChronoFrame(chronoFrame):
                 'resizeoutputfolder':   '',
                 'resizewidth':          '800',
                 'resizeheight':         '600',
+                'rotateangle':          '0',
 
                 'annotatesourcefolder': '',
                 'annotateoutputfolder': '',
@@ -536,6 +571,7 @@ class ChronoFrame(chronoFrame):
                 'resizeoutputfolder':   self.resizeoutputtext.GetValue(),
                 'resizewidth':          self.resizewidthtext.GetValue(),
                 'resizeheight':         self.resizeheighttext.GetValue(),
+                'rotateangle':          self.rotatecombo.GetValue(),
 
                 'annotatesourcefolder': self.annotatesourcefoldertext.GetValue(),
                 'annotateoutputfolder': self.annotateoutputfoldertext.GetValue(),
@@ -654,14 +690,23 @@ class ChronoFrame(chronoFrame):
 
         # use whole screen if none specified
         if not rect:
-            width, height = wx.DisplaySize()
-            rect = wx.Rect(0,0,width,height)
+            #width, height = wx.DisplaySize()
+            #rect = wx.Rect(0,0,width,height)
+
+            x, y, width, height = wx.Display().GetGeometry()
+            rect = wx.Rect(x,y,width,height)
 
             # use two monitors if checked and avaliable
             if self.options['screenshotdualmonitor'] and wx.Display_GetCount() > 0:
                 second = wx.Display(1)
-                x, y, width2, height2 = second.GetGeometry()
-                rect = wx.Rect(0,0,width+width2, max(height,height2))
+                x2, y2, width2, height2 = second.GetGeometry()
+
+                x3 = min(x,x2)
+                y3 = min(y, y2)
+                width3 = max(x+width, x2+width2) - x3
+                height3 = max(height-y3, height2-y3)
+
+                rect = wx.Rect(x3, y3, width3, height3)
 
         #Create a DC for the whole screen area
         dcScreen = wx.ScreenDC()
@@ -1043,6 +1088,75 @@ class ChronoFrame(chronoFrame):
                 #self.debug(str(e))
 
         progressdialog.Update( len(images), 'Resizing Complete')
+
+
+    def rotatePressed(self, event): # wxGlade: chronoFrame.<event_handler>
+
+        # check source dir
+        if not os.path.isdir(self.resizesourcetext.GetValue()):
+            self.showWarning('Invalid Path', 'The source path is invalid')
+            return False
+
+        # check output dir
+        if not os.path.isdir(self.resizeoutputtext.GetValue()):
+            self.showWarning('Invalid Path', 'The output path is invalid')
+            return False
+
+        # check write permission
+        if not os.access(self.resizeoutputtext.GetValue(), os.W_OK):
+            self.showWarning('No write permission',
+            'Error: Cannot write to %s. Please set write permissions and try again' % self.resizeoutputtext.GetValue())
+            return False
+
+        try:
+            rot = int(self.rotatecombo.GetValue())
+
+            if rot < 0 or rot > 360:
+                raise Exception()
+            self.debug('Setting rotation: %d' % rot)
+        except:
+            self.showWarning('Invalid Rotation',
+            'Error: Rotation is invalid. Must be a positive integer less than 360')
+            return False
+
+        # check for images
+        images = os.listdir(self.resizesourcetext.GetValue())
+        if len(images) == 0:
+            self.showWarning('No files found',
+            'No files found in source directory')
+            return False
+
+        # show progress dialog
+        progressdialog = wx.ProgressDialog('Resize Progress', 'Processing Images',
+                        maximum=len(images), parent=self, style= wx.PD_CAN_ABORT | wx.PD_APP_MODAL | wx.PD_ELAPSED_TIME | wx.PD_REMAINING_TIME)
+
+        # for all images in main folder
+        count = 0
+        for f in images:
+
+            # update progress dialog
+            count += 1
+            cancel, somethingelse = progressdialog.Update(count, 'Processing %s'%f)
+            # update progress dialog
+            if not cancel:
+                progressdialog.Destroy()
+                break
+
+            try:
+                # open with PIL -- will skip non-images
+                source = Image.open(os.path.join(self.resizesourcetext.GetValue(), f))
+
+                # rotate image
+                if rot > 0:
+                    rotated = source.rotate(rot, expand=True)
+
+                # save image
+                rotated.save(os.path.join(self.resizeoutputtext.GetValue(), f))
+
+            except Exception, e:
+                pass
+
+        progressdialog.Update( len(images), 'Rotating Complete')
 
     def fontSelectPressed(self, event): # wxGlade: chronoFrame.<event_handler>
         data = wx.FontData()
@@ -1747,7 +1861,6 @@ class ChronoFrame(chronoFrame):
             wx.LaunchDefaultBrowser(path)
 
     def aboutMenuClicked(self, event):
-
         info = wx.AboutDialogInfo()
         info.Name = "Chronolapse"
         info.Version = self.VERSION
@@ -1775,6 +1888,10 @@ a front end to mencode to take your series of images and turn them into a movie.
 
         # Then we call wx.AboutBox giving it that info object
         wx.AboutBox(info)
+
+    def iconClose(self, event):
+        self.debug('Closing from taskbar')
+        self.Close(True)
 
     def checkVersion(self):
         try:
@@ -1807,14 +1924,11 @@ a front end to mencode to take your series of images and turn them into a movie.
 
                     #parse page
                     content = page.read()
+                    dom = xml.dom.minidom.parseString(content)
 
-                    # parse response
-                    kml = KML()
-                    tree = kml.parse(content)
-
-                    app = tree.root.application
-                    version = app.version.getValue()
-                    url = app.url.getValue()
+                    version = dom.getElementsByTagName('version')[0].childNodes[0].data
+                    url = dom.getElementsByTagName('url')[0].childNodes[0].data
+                    changedate = dom.getElementsByTagName('changedate')[0].childNodes[0].data
 
                     # if version is different, show popup
                     if version.lower() != self.VERSION.lower():
@@ -1843,6 +1957,70 @@ You can download the new version at:
         except Exception, e:
             self.showWarning('Failed to check version', 'Failed to check version. %s' % str(e))
             self.debug( repr(e), self.NORMAL)
+
+
+class TaskBarIcon(wx.TaskBarIcon):
+
+    def __init__(self, parent, MainFrame, workingdir):
+        wx.TaskBarIcon.__init__(self)
+        self.parentApp = parent
+        self.MainFrame = MainFrame
+        self.wx_id = wx.NewId()
+        self.SetIcon(wx.Icon( os.path.join( os.path.abspath(workingdir), "chronolapse.ico"),wx.BITMAP_TYPE_ICO), 'Chronolapse')
+        self.CreateMenu()
+
+    def toggle_window_visibility(self, event):
+        if self.MainFrame.IsIconized() or not self.MainFrame.IsShown():
+            self.set_window_visible_on(event)
+        else:
+            self.set_window_visible_off(event)
+
+    def set_window_visible_off(self, event):
+        self.MainFrame.Show(False)
+        self.menu.FindItemById(self.wx_id).SetText("Restore")
+
+    def set_window_visible_on(self, event):
+        self.MainFrame.Iconize(False)
+        self.MainFrame.Show(True)
+        self.MainFrame.Raise()
+        self.menu.FindItemById(self.wx_id).SetText("Minimize")
+
+    def CreateMenu(self):
+        self.Bind(wx.EVT_TASKBAR_RIGHT_UP, self.ShowMenu)
+        self.Bind(wx.EVT_TASKBAR_LEFT_DCLICK, self.toggle_window_visibility)
+        self.Bind(wx.EVT_MENU, self.toggle_window_visibility, id=self.wx_id)
+        self.Bind(wx.EVT_MENU, self.MainFrame.iconClose, id=wx.ID_EXIT)
+        self.MainFrame.Bind(wx.EVT_ICONIZE, self.set_window_visible_off)
+        self.menu=wx.Menu()
+        self.menu.Append(self.wx_id, "Minimize","...")
+        self.menu.AppendSeparator()
+        self.menu.Append(wx.ID_EXIT, "Close App")
+
+    def ShowMenu(self,event):
+        self.PopupMenu(self.menu)
+##        if self.MainFrame.IsShown() and not self.MainFrame.IsIconized():
+##            self.menu.FindItemById(self.wx_id).SetText("Minimize")
+##        else:
+##            self.menu.FindItemById(self.wx_id).SetText("Restore")
+
+
+class TaskBarFrame(wx.Frame):
+    def __init__(self, parent, MainFrame, id, title, workingdir):
+        wx.Frame.__init__(self, parent, -1, title, size = (1, 1),
+            style=wx.FRAME_NO_TASKBAR|wx.NO_FULL_REPAINT_ON_RESIZE)
+        self.tbicon = TaskBarIcon(self, MainFrame, workingdir)
+        self.Show(True)
+        self.MainFrame = MainFrame
+
+    def kill(self, event):
+        event.Skip()
+        self.tbicon.RemoveIcon()
+        self.tbicon.Destroy()
+        self.Close()
+
+    def toggle_window_visibility(self, event):
+        self.tbicon.toggle_window_visibility(event)
+
 
 # run it!
 if __name__ == "__main__":
