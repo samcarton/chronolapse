@@ -22,6 +22,7 @@
         - added -a flag for autostarting
         - added minimizing to tray option
         - added rotate option and changed resize tab to adjust tab
+        - fixed dual monitor support to work with any orientation or relative resolution
 """
 
 VERSION = '1.0.2'
