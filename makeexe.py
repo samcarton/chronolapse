@@ -21,7 +21,7 @@ appname = 'Chronolapse'
 shortname = 'chronolapse'
 entrypoint = 'chronolapse.py'
 
-reshackpath = 'D:\\programs\\reshack\\ResHacker.exe'
+reshackpath = 'c:\\Program Files\\Resource Hacker\\ResHacker.exe'
 iconpath = 'chronolapse.ico'
 
 files = ['manual.html', 'license.txt', 'mencoder.exe', 'helvB08.pil', 'helvB08.png', 'helvetica-10.pil', 'helvetica-10.png', 'chronolapse.ico']
@@ -79,7 +79,7 @@ if exebuilder == 'pyinstaller':
         f.close()
 
     print "CREATING SPEC FILE"
-    proc = subprocess.Popen( "%s -F -X -n %s %s"% (os.path.join(pyinstallerpath, "Makespec.py"), shortname, entrypoint), shell=True)
+    proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "Makespec.py"), shortname, iconpath, entrypoint), shell=True)
     proc.communicate()
 
     print "BUILDING EXECUTABLE"
@@ -90,10 +90,10 @@ if exebuilder == 'pyinstaller':
     os.mkdir( DISTFOLDER)
 
     # copy exe there
-    if os.path.isfile('%s.exe'%shortname):
-        shutil.move('%s.exe'%shortname, os.path.join(DISTFOLDER, '%s.exe'%shortname))
+    if os.path.isfile('dist\\%s.exe'%shortname):
+        shutil.move( 'dist\\%s.exe'%shortname, os.path.join(DISTFOLDER, '%s.exe'%shortname))
     elif os.path.isfile('%s.exe'%shortname):
-        shutil.move('%s.exe'%shortname, os.path.join(DISTFOLDER, '%s.exe'%shortname))
+        shutil.move( '%s.exe'%shortname, os.path.join(DISTFOLDER, '%s.exe'%shortname))
     else:
         print "Executable not found... Locate and move it manually :D"
 
@@ -180,17 +180,17 @@ else:
         exelocation = foldername
         print "EXE IN %s" % foldername
 
-    # change icon
-    if iconpath != '':
-        print "UPDATING ICON"
-        command = '"%s" -addoverwrite %s, %s, %s, ICONGROUP, MAINICON, 0'%(
-                    reshackpath,
-                    os.path.join(exelocation, '%s.exe'%shortname),
-                    os.path.join(exelocation, '%s.exe'%shortname),
-                    iconpath)
-        print command
-        proc = subprocess.Popen(command, shell=True)
-        proc.communicate()
+##    # change icon
+##    if iconpath != '':
+##        print "UPDATING ICON"
+##        command = '"%s" -addoverwrite %s, %s, %s, ICONGROUP, MAINICON, 0'%(
+##                    reshackpath,
+##                    os.path.join(exelocation, '%s.exe'%shortname),
+##                    os.path.join(exelocation, '%s.exe'%shortname),
+##                    iconpath)
+##        print command
+##        proc = subprocess.Popen(command, shell=True)
+##        proc.communicate()
 
     # clean up build folder
     print "CLEANING UP"
