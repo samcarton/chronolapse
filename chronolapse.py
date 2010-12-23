@@ -10,10 +10,6 @@
         create a picture-in-picture effect, resize images, and 'annotate' your images/videos.
     @license: MIT license - see license.txt
     @todo:
-        timestamp text position on webcam and screenshot
-        select which camera device #
-        if going to linux, need to make annotate and pip copy over ctime info, since it isnt creation time there
-        linux release-  mencoder executable?
 
     @change: 1.0.1
         - fixed outputting video to path with spaces - used a bit of a hack for mencoder to work -- issue 1
@@ -23,11 +19,22 @@
         - added minimizing to tray option
         - added rotate option and changed resize tab to adjust tab
         - fixed dual monitor support to work with any orientation or relative resolution
+    @change: 1.0.3
+        - fixed a bug with times under 1 second being fired 1000 times too fast
+        - silently fails if set to capture 2 monitors but they are duplicated
+        - added system wide hotkey -- doesnt seem to work right in wx so it is only part implemented
+        - added audio tab to dub audio onto your timelapse
+        - added a drop shadow option for annotations
+        - added a schedule tab for scheduling starts and/or stops
+
 """
 
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 
-import wx, time, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2
+import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2
+import win32con, wxkeycodes
+import wx.lib.masked as masked
+
 from PIL import Image
 
 try:
@@ -184,6 +191,25 @@ class ChronoFrame(chronoFrame):
         # bind OnClose method
         self.Bind(wx.EVT_CLOSE, self.OnClose)
 
+        # hotkey stuff
+        self.hotkeyid = wx.NewId()
+        self.Bind(wx.EVT_HOTKEY, self.handleHotKey)
+        self.hotkeytext.Bind(wx.EVT_KEY_DOWN, self.hotkeyTextEntered)
+        self.hotkeyraw = 0
+        self.hotkeymods = 0
+
+        # schedule stuff
+        self.Bind(wx.EVT_DATE_CHANGED, self.startDateChanged, self.startdate)
+        self.Bind(wx.EVT_DATE_CHANGED, self.endDateChanged, self.enddate)
+        self.Bind(masked.EVT_TIMEUPDATE, self.startTimeChanged, self.starttime)
+        self.Bind(masked.EVT_TIMEUPDATE, self.endTimeChanged, self.endtime)
+        self.starttimer = Timer(self.startTimerCallBack)
+        self.endtimer = Timer(self.endTimerCallBack)
+        self.schedulestartdate = ''
+        self.schedulestarttime = ''
+        self.scheduleenddate = ''
+        self.scheduleendtime = ''
+
         # constants
         self.VERSION = VERSION
         self.ANNOTATIONFILE = 'chronolapse.annotate'
@@ -235,7 +261,7 @@ class ChronoFrame(chronoFrame):
         # option defaults
         self.options = {
 
-        'font': wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL),
+        'font': wx.Font(22, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL),
         'fontdata': wx.FontData(),
 
         'screenshottimestamp':  True,
@@ -315,7 +341,7 @@ class ChronoFrame(chronoFrame):
 
         # start timer - if frequency < 1 second, use small increments, otherwise, 1 second will be plenty fast
         if self.countdown < 1:
-            self.timer.Start( self.countdown)
+            self.timer.Start( self.countdown * 1000)
         else:
             self.timer.Start(1000)
 
@@ -334,6 +360,26 @@ class ChronoFrame(chronoFrame):
         if self.countdown <= 0:
             self.capture()      # take screenshot and webcam capture
             self.countdown = float(self.frequencytext.GetValue()) # reset timer
+
+    def fileBrowser(self, message, defaultFile=''):
+        dlg = wx.FileDialog(self, message, defaultFile=defaultFile,
+                        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+        if dlg.ShowModal() == wx.ID_OK:
+            path = dlg.GetPath()
+        else:
+            path = ''
+        dlg.Destroy()
+        return path
+
+    def saveFileBrowser(self, message, defaultFile=''):
+        dlg = wx.FileDialog(self, message, defaultFile=defaultFile,
+                        style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+        if dlg.ShowModal() == wx.ID_OK:
+            path = dlg.GetPath()
+        else:
+            path = ''
+        dlg.Destroy()
+        return path
 
     def dirBrowser(self, message, defaultpath):
         # show dir dialog
@@ -438,6 +484,13 @@ class ChronoFrame(chronoFrame):
                 self.videocodeccombo.SetStringSelection(config['videocodec'])
                 self.videoframeratetext.SetValue(config['videoframerate'])
                 self.mencoderpathtext.SetValue(config['mencoderpath'])
+            except Exception, e:
+                self.debug(str(e))
+
+            try:
+                self.audiosourcevideotext.SetValue(config['audiosourcevideo'])
+                self.audiosourcetext.SetValue(config['audiosource'])
+                self.audiooutputfoldertext.SetValue(config['audiooutputfolder'])
             except Exception, e:
                 self.debug(str(e))
 
@@ -548,7 +601,11 @@ class ChronoFrame(chronoFrame):
                 'videoformat':          '',
                 'videocodec':           'wmv2',
                 'videoframerate':       '10',
-                'mencoderpath':         str(mencoderpath)
+                'mencoderpath':         str(mencoderpath),
+
+                'audiosourcevideo':     '',
+                'audiosource':          '',
+                'audiooutputfolder':    ''
             }
 
             # pickle it
@@ -596,7 +653,13 @@ class ChronoFrame(chronoFrame):
                 'videoformat':          self.videoformatcombo.GetStringSelection(),
                 'videocodec':           self.videocodeccombo.GetStringSelection(),
                 'videoframerate':       self.videoframeratetext.GetValue(),
-                'mencoderpath':         self.mencoderpathtext.GetValue()
+                'mencoderpath':         self.mencoderpathtext.GetValue(),
+
+                'audiosourcevideo':     self.audiosourcevideotext.GetValue(),
+                'audiosource':          self.audiosourcetext.GetValue(),
+                'audiooutputfolder':    self.audiooutputfoldertext.GetValue()
+
+
             }
 
             # append to self.options
@@ -697,17 +760,20 @@ class ChronoFrame(chronoFrame):
             x, y, width, height = wx.Display().GetGeometry()
             rect = wx.Rect(x,y,width,height)
 
-            # use two monitors if checked and avaliable
-            if self.options['screenshotdualmonitor'] and wx.Display_GetCount() > 0:
-                second = wx.Display(1)
-                x2, y2, width2, height2 = second.GetGeometry()
+            try:
+                # use two monitors if checked and available
+                if self.options['screenshotdualmonitor'] and wx.Display_GetCount() > 0:
+                    second = wx.Display(1)
+                    x2, y2, width2, height2 = second.GetGeometry()
 
-                x3 = min(x,x2)
-                y3 = min(y, y2)
-                width3 = max(x+width, x2+width2) - x3
-                height3 = max(height-y3, height2-y3)
+                    x3 = min(x,x2)
+                    y3 = min(y, y2)
+                    width3 = max(x+width, x2+width2) - x3
+                    height3 = max(height-y3, height2-y3)
 
-                rect = wx.Rect(x3, y3, width3, height3)
+                    rect = wx.Rect(x3, y3, width3, height3)
+            except Exception, e:
+                self.debug("Exception while attempting to capture second monitor: %s"%repr(e))
 
         #Create a DC for the whole screen area
         dcScreen = wx.ScreenDC()
@@ -1332,6 +1398,8 @@ class ChronoFrame(chronoFrame):
 
             if self.annotatefadeincheck.GetValue():
                 fadetimein = duration/3.0
+            else:
+                fadetimein = 0.0
 
             count = 0
             for f in sourcefiles:
@@ -1440,6 +1508,7 @@ class ChronoFrame(chronoFrame):
         self.debug('Annotation Complete', self.VERBOSE)
 
     def applyAnnotation( self, filename, sourcefolder, destfolder, text, font, fontdata, opacity, position):
+        self.debug('Applying annotation: file: %s  text: %s opacity: %s' % (filename, text, opacity))
 
         sourcefile = os.path.join(sourcefolder, filename)
         fontcolor = fontdata.GetColour()
@@ -1472,11 +1541,23 @@ class ChronoFrame(chronoFrame):
         # set font
         memDC.SetFont(font)
 
+        # save colors
+        red = fontcolor.Red()
+        green = fontcolor.Green()
+        blue = fontcolor.Blue()
+
+        # write drop shadow if selected
+        if self.dropshadowcheck.IsChecked():
+            # set opacity and color
+            fontcolor.Set( 0,0,0, int(255*opacity))
+            memDC.SetTextForeground(fontcolor)
+            memDC.DrawText(text, x+2, y+2)
+
         # set opacity and color
-        fontcolor.Set( fontcolor.Red(), fontcolor.Green(), fontcolor.Blue(), 255.0*opacity)
+        fontcolor.Set( red, green, blue, int(255*opacity))
         memDC.SetTextForeground(fontcolor)
 
-        # write annotation on image -- # todo:  opacity
+        # write annotation on image
         memDC.DrawText(text, x, y)
 
         # save image
@@ -1739,8 +1820,12 @@ class ChronoFrame(chronoFrame):
         # check mencoder path
         mencoderpath = self.mencoderpathtext.GetValue()
         if not os.path.isfile(mencoderpath):
-            self.showWarning('MEncoder Path Invalid', 'The MEncoder path is invalid. Please select the MEncoder executable and try again.')
-            return False
+            # look for mencoder
+            if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')):
+                self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder.exe')
+                return False
+            else:
+                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
 
         fps = self.videoframeratetext.GetValue()
         try:
@@ -1749,10 +1834,6 @@ class ChronoFrame(chronoFrame):
             self.showWarning('Frame Rate Invalid', 'The frame rate setting is invalid. Frame rate must be a positive integer')
             return False
 
-        # look for mencoder
-        if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')):
-            self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder.exe')
-            return False
 
         # get dimensions of first image file
         found = False
@@ -1856,6 +1937,187 @@ class ChronoFrame(chronoFrame):
         dlg.ShowModal()
         dlg.Destroy()
 
+    def audioSourceVideoBrowsePressed(self, event): # wxGlade: chronoFrame.<event_handler>
+        path = self.fileBrowser('Select video source',
+                    self.audiosourcevideotext.GetValue())
+
+        if path != '':
+            self.options['audiosourcevideo'] = path
+            self.audiosourcevideotext.SetValue(path)
+
+            self.saveConfig()
+
+    def audioSourceBrowsePressed(self, event): # wxGlade: chronoFrame.<event_handler>
+        path = self.fileBrowser('Select audio source',
+                    self.audiosourcetext.GetValue())
+
+        if path != '':
+            self.options['audiosource'] = path
+            self.audiosourcetext.SetValue(path)
+
+            if not os.access( path, os.W_OK):
+                self.showWarning("Permission Error",
+                    'Error: the video output path %s is not writable. Please set write permissions and try again.'%path)
+
+            self.saveConfig()
+
+    def audioOutputFolderBrowsePressed(self, event): # wxGlade: chronoFrame.<event_handler>
+        path = self.dirBrowser('Select save folder for new video ',
+                    self.audiooutputfoldertext.GetValue())
+
+        if path != '':
+            self.options['audiooutputfolder'] = path
+            self.audiooutputfoldertext.SetValue(path)
+
+            if not os.access( path, os.W_OK):
+                self.showWarning("Permission Error",
+                    'Error: the video output path %s is not writable. Please set write permissions and try again.'%path)
+
+            self.saveConfig()
+
+    def createAudioPressed(self, event): # wxGlade: chronoFrame.<event_handler>
+
+        # check that paths are valid
+        videosource = self.audiosourcevideotext.GetValue()
+        videofolder = os.path.dirname(videosource)
+        videobase = os.path.basename(videosource)
+        audiosource = self.audiosourcetext.GetValue()
+        destfolder = self.audiooutputfoldertext.GetValue()
+
+        if not os.path.isfile(videosource):
+            self.showWarning('Video path invalid', 'The source video path appears is invalid')
+            return False
+
+        if not os.path.isfile(audiosource):
+            self.showWarning('Audio path invalid', 'The source audio path appears is invalid')
+            return False
+
+        # check that destination folder exists and is writable
+        if not os.access( destfolder, os.W_OK):
+            self.showWarning('Permission Denied', 'The output folder %s is not writable. Please change the permissions and try again.'%destfolder)
+            return False
+
+        # check mencoder path
+        mencoderpath = self.mencoderpathtext.GetValue()
+        if not os.path.isfile(mencoderpath):
+            # look for mencoder
+            if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')):
+                self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder.exe')
+                return False
+            else:
+                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
+
+        # make sure video name has no spaces
+        if videobase.index(' ') != -1:
+
+            try:
+                # copy audio to video source folder
+                self.debug('Creating temporary file for video')
+                handle, safevideoname = tempfile.mkstemp('_deleteme' + os.path.splitext(videobase)[1], 'chrono_', videofolder)
+                os.close(handle)
+                self.debug('Copying video file to %s' % safevideoname)
+                shutil.copy(videosource, safevideoname)
+            except Exception, e:
+                self.showWarning('Temp Audio Error', "Exception while copying audio to video folder: %s" % repr(e))
+        else:
+            # no spaces, use this
+            safevideoname = videobase
+
+        # get output file name  ---  create in source folder then move bc of ANOTHER mencoder bug
+        outfile = "%s-audio%s"%(os.path.splitext(safevideoname)[0], os.path.splitext(safevideoname)[1])
+        if os.path.isfile(os.path.join(destfolder, outfile)):
+            count = 2
+            while os.path.isfile(os.path.join(destfolder, "%s-audio%d%s"%(os.path.splitext(safevideoname)[0], count,os.path.splitext(safevideoname)[1]))):
+                count += 1
+            outfile = "%s-audio%d%s"%(os.path.splitext(safevideoname)[0], count,os.path.splitext(safevideoname)[1])
+
+        # change cwd to video folder to stop mencoder bug
+        try:
+            self.debug('Changing directory to %s' % videofolder)
+            os.chdir( videofolder)
+        except Exception, e:
+            self.showWarning('CWD Error', "Could not change current directory. %s" % repr(e))
+
+            # delete temp video file
+            if safevideoname != videobase:
+                try:
+                    os.remove(safevideoname)
+                except:
+                    pass
+
+            return False
+
+        newaudiopath = ''
+        try:
+            # copy audio to video source folder
+            self.debug('Creating temporary file for audio')
+            handle, newaudiopath = tempfile.mkstemp('_deleteme' + os.path.splitext(audiosource)[1], 'chrono_', videofolder)
+            os.close(handle)
+            self.debug('Copying audio file to %s' % newaudiopath)
+            shutil.copy(audiosource, newaudiopath)
+        except Exception, e:
+            self.showWarning('Temp Audio Error', "Exception while copying audio to video folder: %s" % repr(e))
+
+        # create progress dialog
+        progressdialog = wx.ProgressDialog('Dubbing Progress', 'Dubbing - Please Wait')
+        progressdialog.Pulse('Dubbing - Please Wait')
+
+        # mencoder -ovc copy -audiofile silent.mp3 -oac copy input.avi -o output.avi
+        command = '"%s" -ovc copy -audiofile %s -oac copy %s -o %s' % (
+        mencoderpath, os.path.basename(newaudiopath), safevideoname, outfile )
+
+        self.debug("Calling: %s"%command)
+        proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+
+        stdout, stderr = proc.communicate()
+        returncode = proc.returncode
+
+        # mencoder error
+        if returncode > 0:
+            progressdialog.Destroy()
+            self.showWarning('MEncoder Error', stderr)
+
+            # delete temporary audio file
+            if newaudiopath != '':
+                try:
+                    os.remove(newaudiopath)
+                except Exception, e:
+                    self.debug('Exception while deleting temp audio file %s: %s' % (newaudiopath, repr(e)))
+
+            # delete temp video file
+            if safevideoname != videobase:
+                try:
+                    os.remove(safevideoname)
+                except:
+                    pass
+
+            return
+
+        # move video file to destination folder
+        if videofolder != destfolder:
+            self.debug("Moving file from %s to %s" % (os.path.join(videodir,outfile), os.path.join(destfolder, outfile)))
+            shutil.move(os.path.join(os.path.dirname(videosource),outfile), os.path.join(destfolder, outfile))
+
+        progressdialog.Destroy()
+
+        # delete temporary audio file
+        if newaudiopath != '':
+            try:
+                os.remove(newaudiopath)
+            except Exception, e:
+                self.debug('Exception while deleting temp audio file %s: %s' % (newaudiopath, repr(e)))
+
+        # delete temp video file
+        if safevideoname != videobase:
+            try:
+                os.remove(safevideoname)
+            except:
+                pass
+
+        dlg = wx.MessageDialog(self, 'Dubbing Complete!\nFile saved as %s'%os.path.join(destfolder, outfile), 'Dubbing Complete', style=wx.OK)
+        dlg.ShowModal()
+        dlg.Destroy()
+
     def instructionsMenuClicked(self, event):
         path = os.path.join(self.CHRONOLAPSEPATH, self.DOCFILE)
         if os.path.isfile(path):
@@ -1894,6 +2156,189 @@ a front end to mencode to take your series of images and turn them into a movie.
         self.debug('Closing from taskbar')
         self.Close(True)
 
+    def registerHotkey(self, event):
+        # prompt user to ask if they are sure bc
+        # the hotkeys dont work right in wx yet
+
+        if self.hotkeyraw in [0]:
+            return
+
+        dlg = wx.MessageDialog(self,
+"""Are you sure you want to register a hotkey?
+This does NOT work right in WX and will
+prevent any other application from receiving
+the hotkey press, therefore we recommend
+you use a complicated hotkey or avoid using
+one at all.
+
+Note: You must close Chronolapse
+to end the hotkey binding.
+""",
+                           'Register Hotkey?',
+                           #wx.OK | wx.ICON_INFORMATION
+                           wx.YES_NO #| wx.NO_DEFAULT | wx.CANCEL | wx.ICON_INFORMATION
+                           )
+        choice = dlg.ShowModal()
+        dlg.Destroy()
+
+        # if user wants to check
+        if choice == wx.ID_YES:
+            if self.hotkeyraw not in [0]:
+                self.RegisterHotKey(self.hotkeyid, self.hotkeymods, self.hotkeyraw)
+                self.debug('Registered hotkey - mods: %d  rawcode: %d'% (self.hotkeymods,self.hotkeyraw))
+
+    def hotkeyTextEntered(self, event):
+        if type(event) is not type(wx.KeyEvent()):
+            return
+
+        # read keys used
+        keycode = event.GetKeyCode()
+        rawcode = event.GetRawKeyCode()
+        mods = event.GetModifiers()
+
+        # generate hotkey text
+        text = ''
+        if mods is not 0:
+            text = wxkeycodes.wxmodtoname[mods]
+
+        if keycode in wxkeycodes.wxtoname.keys():
+            if text is not '':
+                text += '+'
+            text += '%s' % wxkeycodes.wxtoname[keycode]
+
+        elif keycode not in [306, 307, 308]:
+            if text is not '':
+                text += '+'
+            text += '?'
+
+        # save in config
+            # TODO
+
+        # put text in hotkey box
+        self.hotkeytext.SetValue(text)
+
+        # save keys
+        self.hotkeyraw = rawcode
+        self.hotkeymods = mods
+
+    def unregisterHotkey(self):
+        self.debug('Attempting to Unregister Hotkey')
+        self.UnregisterHotKey(self.hotkeyid)
+        #self.hotkeyid = wx.NewId()
+
+    def hotkeycheckChecked(self, event):
+        if not self.hotkeycheck.IsChecked():
+            self.unregisterHotkey()
+        else:
+            print "NEED TO REGISTER HOTKEY BASED ON TEXT"
+
+    def handleHotKey(self, event):
+        self.debug('Hotkey Pressed')
+        event.Skip()
+        self.forceCapturePressed(None)
+
+    def startDateChanged(self, event):
+        self.debug('Start Date: %s'% event.GetDate())
+        self.schedulestartdate = event.GetDate()
+
+    def endDateChanged(self, event):
+        self.debug('End Date: %s'% event.GetDate())
+        self.scheduleenddate = event.GetDate()
+
+    def startTimeChanged(self, event):
+        self.debug('Start Time: %s' % self.starttime.GetValue())
+        self.schedulestarttime = self.starttime.GetValue()
+
+    def endTimeChanged(self, event):
+        self.debug('End Time: %s'% self.endtime.GetValue())
+        self.scheduleendtime = self.endtime.GetValue()
+
+    def startTimerCallBack(self):
+        self.debug('Schedule start timer call back - starting capture')
+        self.startTimer()
+
+    def endTimerCallBack(self):
+        self.debug('Schedule end timer call back - ending capture')
+        self.stopTimer()
+
+    def activateScheduleCheck(self, event):
+        # if becoming checked
+        if self.activateschedulecheck.IsChecked():
+            # disable the other schedule options
+            self.starttime.Disable()
+            self.startdate.Disable()
+            self.endtime.Disable()
+            self.enddate.Disable()
+
+            # schedule start and stop
+            self.activateSchedule()
+
+        # if becoming unchecked
+        else:
+            # enable other schedule options
+            self.starttime.Enable()
+            self.startdate.Enable()
+            self.endtime.Enable()
+            self.enddate.Enable()
+
+            # deactivate schedule
+            self.deactivateSchedule()
+
+    def activateSchedule(self):
+        self.debug('Activating Schedule')
+
+        # if nothing has been changed yet, this will either be correct or already passed anyway
+        if self.schedulestartdate == '':
+            self.schedulestartdate = datetime.datetime.now()
+            self.schedulestartdate = self.schedulestartdate.replace(hour=0, minute=0, second=0, microsecond=0)
+        if self.scheduleenddate == '':
+            self.scheduleenddate = datetime.datetime.now()
+            self.scheduleenddate = self.scheduleenddate.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        if self.schedulestarttime == '':
+            self.schedulestarttime = self.starttime.GetValue()
+        if self.scheduleendtime == '':
+            self.scheduleendtime = self.endtime.GetValue()
+
+        # add together date and time
+        startsplit = self.schedulestarttime.split(':')
+        starttimedelta = datetime.timedelta(hours=int(startsplit[0]), minutes=int(startsplit[1]), seconds=int(startsplit[2]))
+        start = self.schedulestartdate + starttimedelta
+        # add together date and time
+        endsplit = self.scheduleendtime.split(':')
+        endtimedelta = datetime.timedelta(hours=int(endsplit[0]), minutes=int(endsplit[1]), seconds=int(endsplit[2]))
+        end = self.scheduleenddate + endtimedelta
+
+        # get seconds since epoch
+        startseconds = self.dttoseconds(start)
+        endseconds = self.dttoseconds(end)
+
+        # get seconds from now until times
+        startin = startseconds - time.time()
+        endin = endseconds - time.time()
+
+        # schedule timers
+        if startin > 0:
+            self.debug('Scheduled start for %d seconds' % int(startin))
+            self.starttimer.Start(startin * 1000, True)
+        if endin > 0:
+            self.debug("Scheduled end for %d seconds" % int(endin))
+            self.endtimer.Start(endin * 1000, True)
+
+    def dttoseconds(self, dt):
+        string = dt.strftime('%Y-%m-%d %H:%M:%S')
+        timetuple = time.strptime(string,'%Y-%m-%d %H:%M:%S')
+        return time.mktime(timetuple)
+
+    def deactivateSchedule(self):
+        self.debug('Deactivating Schedule')
+
+        if self.starttimer.IsRunning():
+            self.starttimer.Stop()
+
+        if self.endtimer.IsRunning():
+            self.endtimer.Stop()
+
     def checkVersion(self):
         try:
             # if it has been more than a week since the last check
@@ -1904,7 +2349,6 @@ a front end to mencode to take your series of images and turn them into a movie.
 
             # calculate time since last update
             timesince = time.mktime(time.localtime()) - parsedtime
-
 
             if timesince > self.UPDATECHECKFREQUENCY:
                 # show popup to confirm user wants to access the net
