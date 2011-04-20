@@ -26,12 +26,16 @@
         - added audio tab to dub audio onto your timelapse
         - added a drop shadow option for annotations
         - added a schedule tab for scheduling starts and/or stops
+    @change: 1.0.4
+        - added a rough and dirty threading implementation for the mencoder call -- trying to fix hang in GUI form
+        - changed popen to just pop up a window with output -- was hanging on mencoder call with no window to print to
+        - fixed update check code
 
 """
 
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 
-import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2
+import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
 import win32con, wxkeycodes
 import wx.lib.masked as masked
 
@@ -1913,15 +1917,18 @@ class ChronoFrame(chronoFrame):
         mencoderpath, path, fps, codec, outfile )
 
         self.debug("Calling: %s"%command)
-        proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-  #      mencoder mf://*.jpg -mf w=800:h=600:fps=25:type=jpg -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy -o output.avi
 
-        stdout, stderr = proc.communicate()
+        self.returncode = None
+        mencoderthread = threading.Thread(None, self.runMencoderInThread, 'mencoderthread', (command,))
+        mencoderthread.start()
 
-        returncode = proc.returncode
+        while self.returncode is None:
+            time.sleep(.5)
+            progressdialog.Pulse()
+
 
         # mencoder error
-        if returncode > 0:
+        if self.returncode > 0:
             progressdialog.Destroy()
 
             self.showWarning('MEncoder Error', stderr)
@@ -1936,6 +1943,20 @@ class ChronoFrame(chronoFrame):
         dlg = wx.MessageDialog(self, 'Encoding Complete!\nFile saved as %s'%os.path.join(destfolder, outfile), 'Encoding Complete', style=wx.OK)
         dlg.ShowModal()
         dlg.Destroy()
+
+
+    def runMencoderInThread(self, command):
+        #proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+
+        self.debug('Running mencoder in thread')
+        #proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+
+        proc = subprocess.Popen(command, close_fds=True)
+  #      mencoder mf://*.jpg -mf w=800:h=600:fps=25:type=jpg -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy -o output.avi
+        stdout, stderr = proc.communicate()
+
+        self.returncode = proc.returncode
+
 
     def audioSourceVideoBrowsePressed(self, event): # wxGlade: chronoFrame.<event_handler>
         path = self.fileBrowser('Select video source',
