@@ -30,10 +30,11 @@
         - added a rough and dirty threading implementation for the mencoder call -- trying to fix hang in GUI form
         - changed popen to just pop up a window with output -- was hanging on mencoder call with no window to print to
         - fixed update check code
-
+    @change: 1.0.5
+        - added subsection option for screenshots
 """
 
-VERSION = '1.0.4'
+VERSION = '1.0.5'
 
 import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
 import win32con, wxkeycodes
@@ -273,6 +274,12 @@ class ChronoFrame(chronoFrame):
         'screenshotprefix':     'screen_',
         'screenshotformat':     'jpg',
         'screenshotdualmonitor': False,
+
+        'screenshotsubsection': False,
+        'screenshotsubsectiontop': '0',
+        'screenshotsubsectionleft': '0',
+        'screenshotsubsectionwidth': '800',
+        'screenshotsubsectionheight': '600',
 
         'webcamtimestamp':  True,
         'webcamsavefolder':     '',
@@ -749,7 +756,21 @@ class ChronoFrame(chronoFrame):
         prefix = self.options['screenshotprefix']
         format = self.options['screenshotformat']
 
-        img = self.takeScreenshot(None, timestamp)
+
+        rect = None
+        if self.options['screenshotsubsection']:
+            if (self.options['screenshotsubsectiontop'] > 0 and
+                self.options['screenshotsubsectionleft'] > 0 and
+                self.options['screenshotsubsectionwidth'] > 0 and
+                self.options['screenshotsubsectionheight'] > 0):
+                rect = wx.Rect(
+                        int(self.options['screenshotsubsectiontop']),
+                        int(self.options['screenshotsubsectionleft']),
+                        int(self.options['screenshotsubsectionwidth']),
+                        int(self.options['screenshotsubsectionheight'])
+                    )
+
+        img = self.takeScreenshot(rect, timestamp)
         self.saveImage(img, filename, folder, prefix, format)
 
     def takeScreenshot(self, rect = None, timestamp=False):
@@ -863,17 +884,39 @@ class ChronoFrame(chronoFrame):
     def screenshotConfigurePressed(self, event): # wxGlade: chronoFrame.<event_handler>
         dlg = ScreenshotConfigDialog(self)
 
+        # save reference to this
+        self.screenshotdialog = dlg
+
         # set current options in dlg
         dlg.dualmonitorscheck.SetValue(self.options['screenshotdualmonitor'])
+
+        dlg.subsectioncheck.SetValue(self.options['screenshotsubsection'])
+        dlg.subsectiontop.SetValue(str(self.options['screenshotsubsectiontop']))
+        dlg.subsectionleft.SetValue(str(self.options['screenshotsubsectionleft']))
+        dlg.subsectionwidth.SetValue(str(self.options['screenshotsubsectionwidth']))
+        dlg.subsectionheight.SetValue(str(self.options['screenshotsubsectionheight']))
+
+        # call this to toggle subsection option enabled/disabled
+        dlg.Bind(wx.EVT_CHECKBOX, self.subsectionchecked)
+        self.subsectionchecked()
+
         dlg.timestampcheck.SetValue(self.options['screenshottimestamp'])
         dlg.screenshotprefixtext.SetValue(self.options['screenshotprefix'])
         dlg.screenshotsavefoldertext.SetValue(self.options['screenshotsavefolder'])
         dlg.screenshotformatcombo.SetStringSelection(self.options['screenshotformat'])
 
+
         if dlg.ShowModal() == wx.ID_OK:
 
             # save dialog info
             self.options['screenshotdualmonitor'] = dlg.dualmonitorscheck.IsChecked()
+
+            self.options['screenshotsubsection'] = dlg.subsectioncheck.IsChecked()
+            self.options['screenshotsubsectiontop'] = dlg.subsectiontop.GetValue()
+            self.options['screenshotsubsectionleft'] = dlg.subsectionleft.GetValue()
+            self.options['screenshotsubsectionwidth'] = dlg.subsectionwidth.GetValue()
+            self.options['screenshotsubsectionheight'] = dlg.subsectionheight.GetValue()
+
             self.options['screenshottimestamp'] = dlg.timestampcheck.IsChecked()
             self.options['screenshotprefix'] = dlg.screenshotprefixtext.GetValue()
             self.options['screenshotsavefolder'] = dlg.screenshotsavefoldertext.GetValue()
@@ -2424,6 +2467,21 @@ You can download the new version at:
             self.showWarning('Failed to check version', 'Failed to check version. %s' % str(e))
             self.debug( repr(e), self.NORMAL)
 
+    def subsectionchecked(self, event=None):
+#        try:
+
+            if self.screenshotdialog.subsectioncheck.IsChecked():
+                self.screenshotdialog.subsectiontop.Enable()
+                self.screenshotdialog.subsectionleft.Enable()
+                self.screenshotdialog.subsectionwidth.Enable()
+                self.screenshotdialog.subsectionheight.Enable()
+            else:
+                self.screenshotdialog.subsectiontop.Disable()
+                self.screenshotdialog.subsectionleft.Disable()
+                self.screenshotdialog.subsectionwidth.Disable()
+                self.screenshotdialog.subsectionheight.Disable()
+ #       except:
+  #          pass
 
 class TaskBarIcon(wx.TaskBarIcon):
 
