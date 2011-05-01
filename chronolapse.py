@@ -34,9 +34,12 @@
         - added subsection option for screenshots
     @change: 1.0.6
         - fixed captures at less than 1 second interval -- adds microseconds to filename and timestamp
+    @change: 1.0.7
+        - fixed bug where audio encoding failed when video filename did NOT have a space in it :o
+        - fixed bug like 1.0.4 where audio encoding hanged in exe form but not run from source
 """
 
-VERSION = '1.0.6'
+VERSION = '1.0.7'
 
 import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
 import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
@@ -2084,7 +2087,7 @@ class ChronoFrame(chronoFrame):
                 mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
 
         # make sure video name has no spaces
-        if videobase.index(' ') != -1:
+        if videobase.find(' ') != -1:
 
             try:
                 # copy audio to video source folder
@@ -2143,7 +2146,9 @@ class ChronoFrame(chronoFrame):
         mencoderpath, os.path.basename(newaudiopath), safevideoname, outfile )
 
         self.debug("Calling: %s"%command)
-        proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        #proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+
+        proc = subprocess.Popen(command, close_fds=True)
 
         stdout, stderr = proc.communicate()
         returncode = proc.returncode
