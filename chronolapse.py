@@ -32,11 +32,14 @@
         - fixed update check code
     @change: 1.0.5
         - added subsection option for screenshots
+    @change: 1.0.6
+        - fixed captures at less than 1 second interval -- adds microseconds to filename and timestamp
 """
 
-VERSION = '1.0.5'
+VERSION = '1.0.6'
 
-import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
+import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
+import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
 import win32con, wxkeycodes
 import wx.lib.masked as masked
 
@@ -416,6 +419,10 @@ class ChronoFrame(chronoFrame):
 
         # get filename from time
         filename = time.strftime(self.FILETIMEFORMAT)
+
+        # use microseconds if capture speed is less than 1
+        if self.countdown < 1:
+            filename = str( time.time() )
 
         self.debug('Capturing - ' + filename)
 
@@ -829,6 +836,11 @@ class ChronoFrame(chronoFrame):
         # write timestamp on image
         if timestamp:
             stamp = time.strftime(self.TIMESTAMPFORMAT)
+            if self.countdown < 1:
+                now = time.time()
+                micro = str(now - math.floor(now))[0:4]
+                stamp = stamp + micro
+
             memDC.DrawText(stamp, 20, rect.height-30)
 
         #Select the Bitmap out of the memory DC by selecting a new
@@ -986,7 +998,7 @@ class ChronoFrame(chronoFrame):
                 self.initCam()
 
             # start timer
-            if int(self.frequencytext.GetValue()) > 0:
+            if float(self.frequencytext.GetValue()) > 0:
                 self.startTimer()
 
         elif text == 'Stop Capture':
