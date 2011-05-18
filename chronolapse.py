@@ -36,15 +36,20 @@
         - fixed captures at less than 1 second interval -- adds microseconds to filename and timestamp
     @change: 1.0.7
         - fixed bug where audio encoding failed when video filename did NOT have a space in it :o
-        - fixed bug like 1.0.4 where audio encoding hanged in exe form but not run from source
+
 """
 
-VERSION = '1.0.7'
+VERSION = '1.0.8'
 
 import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
 import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
-import win32con, wxkeycodes
 import wx.lib.masked as masked
+
+if sys.platform.startswith('win'):
+    ONWINDOWS = True
+    import win32con, wxkeycodes
+else:
+    ONWINDOWS = False
 
 from PIL import Image
 
@@ -53,14 +58,16 @@ try:
 except ImportError: # if it's not there locally, try the wxPython lib.
     import wx.lib.agw.knobctrl as KC
 
-try:
-    from VideoCapture import Device
-except:
-    if sys.platform.startswith('win'):
-        print 'VideoCapture library not found. Aborting'
-        sys.exit(1)
-    else:
-        pass
+import cv
+
+##try:
+##    from VideoCapture import Device
+##except:
+##    if sys.platform.startswith('win'):
+##        print 'VideoCapture library not found. Aborting'
+##        sys.exit(1)
+##    else:
+##        pass
 
 from chronolapsegui import *
 
@@ -91,16 +98,15 @@ class WebcamConfigDialog(webcamConfigDialog):
         webcamConfigDialog.__init__(self, *args, **kwargs)
 
         # get cam
-        self.GetParent().initCam()
-
-        #self.GetParent().cam.displayCaptureFilterProperties()
+        self.hascam = False
         try:
-            self.GetParent().cam.displayCapturePinProperties()
-            self.hascam = True
+            if self.GetParent().initCam():
+                self.hascam = True
         except Exception, e:
             self.GetParent().showWarning('No Webcam Found', 'No webcam found on your system.')
             self.hascam = False
             self.GetParent().cam = None
+            self.GetParent().debug(repr(e))
 
     def webcamSaveFolderBrowse(self, event):
         # dir browser
@@ -122,21 +128,36 @@ class WebcamPreviewDialog(webcamPreviewDialog):
 
     def __init__(self, *args, **kwargs):
         webcamPreviewDialog.__init__(self, *args, **kwargs)
-
-
         self.parent = self.GetParent().GetParent()
-
         self.timer = Timer(self.callback)
         self.timer.Start(250)
+        self.temppath = tempfile.mkstemp('.jpg')[1]
+        self.temppath = self.temppath[:-4]  # takeWebcam automatically appends the extension again
 
-        self.cam = self.parent.cam
+        self.previewokbutton.Bind(wx.EVT_BUTTON, self.close)
+
+    def close(self, event=None):
+        self.timer.Stop()
+        # remove the temp file
+        try:
+            time.sleep(1)
+            os.unlink(self.temppath + '.jpg')
+        except Exception, e:
+            self.parent.debug(e)
+
+        del self.timer
+        if event:
+            event.Skip()
 
     def callback(self):
-        path = tempfile.mkstemp('.jpg')[1]
-        image = self.parent.cam.saveSnapshot( path)
-        bitmap = wx.Bitmap(path)
-        self.previewbitmap.SetBitmap(bitmap)
-
+        try:
+            path = self.parent.takeWebcam(os.path.basename(self.temppath), os.path.dirname(self.temppath), '')
+            bitmap = wx.Bitmap(path, wx.BITMAP_TYPE_JPEG)
+            self.previewbitmap.SetBitmap(bitmap)
+            self.previewbitmap.CenterOnParent()
+        except Exception, e:
+            self.parent.debug(repr(e))
+            pass
 
 class Timer(wx.Timer):
     """Timer class"""
@@ -316,13 +337,6 @@ class ChronoFrame(chronoFrame):
 
         # default states
         self.annotatebutton.Disable()
-
-        if sys.platform.lower().startswith('win'):
-            pass
-        else:
-            # disable webcam
-            self.webcamcheck.Disable()
-            self.configurewebcambutton.Disable()
 
         # check version
         self.checkVersion()
@@ -745,27 +759,22 @@ class ChronoFrame(chronoFrame):
 
     def initCam(self, devnum=0):
         if self.cam is None:
-            self.cam = Device(devnum, 0)
-
-            # set resolution
-##            resolution = self.options['webcamresolution'].split(', ')
-##            if len(resolution) == 2:
-##                res = resolution
-##
             try:
-                self.cam.setResolution(640, 480)
+                self.cam = cv.CaptureFromCAM(devnum)
+                if not self.cam:
+                    self.cam = None
+                    self.debug('initCam -- failed to initialize camera')
+                else:
+                    return True
             except:
-                pass
-
-            # take a shot - first one is always blank
-           # self.cam.saveSnapshot( tempfile.mkstemp('.jpg')[1])
+                self.debug('initCam -- failed to initialize camera')
+        return False
 
     def saveScreenshot(self, filename):
         timestamp = self.options['screenshottimestamp']
         folder = self.options['screenshotsavefolder']
         prefix = self.options['screenshotprefix']
         format = self.options['screenshotformat']
-
 
         rect = None
         if self.options['screenshotsubsection']:
@@ -879,16 +888,45 @@ class ChronoFrame(chronoFrame):
 
     def takeWebcam(self, filename, folder, prefix, format='jpg', usetimestamp=False):
 
-        if usetimestamp:
-            timestamp = 1
-        else:
-            timestamp = 0
+        if self.cam is None:
+            self.debug('takeWebcam called with no camera')
+            return False
 
-        fileName = os.path.join(folder,"%s%s.%s" % (prefix, filename, format))
-        self.cam.saveSnapshot(fileName, quality=80, timestamp=timestamp)
-        # saveSnapshot( filename, timestamp=0, boldfont=0, textpos='bl')  additional - anything sent to save
-        # can just set file type with extension apparently... look into PIL
-        # textpos = t/b l/c/r  example  top center = tc
+        filepath = os.path.join(folder,"%s%s.%s" % (prefix, filename, format))
+
+        # JohnColburn says you need to grab a bunch of frames to underflow
+        # the buffer to have a time-accurate frame
+        camera = self.cam
+        cv.GrabFrame(camera)
+##        cv.GrabFrame(camera)
+##        cv.GrabFrame(camera)
+##        cv.GrabFrame(camera)
+##        cv.GrabFrame(camera)
+        im = cv.RetrieveFrame(camera)
+
+        if im is False:
+            self.debug('Error - could not get frame from camera')
+            return False
+
+        #cv.Flip(im, None, 1)
+
+        # write timestamp as necessary
+        if usetimestamp:
+
+            # build timestamp
+            stamp = time.strftime(self.TIMESTAMPFORMAT)
+            now = time.time()
+            micro = str(now - math.floor(now))[0:4]
+            stamp = stamp + micro
+
+            mark = (20, 30)
+            font = cv.InitFont(cv.CV_FONT_HERSHEY_COMPLEX, 0.75, 0.75, 0.0, 2, cv.CV_AA)
+            cv.PutText(im,stamp,mark,font,cv.RGB(0,0,0))
+
+        self.debug('Saving image to %s' % filepath)
+        cv.SaveImage(filepath, im)
+
+        return filepath
 
     def showWarning(self, title, message):
         dlg = wx.MessageDialog(self, message, title, wx.OK | wx.ICON_ERROR)
@@ -1883,11 +1921,11 @@ class ChronoFrame(chronoFrame):
         mencoderpath = self.mencoderpathtext.GetValue()
         if not os.path.isfile(mencoderpath):
             # look for mencoder
-            if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')):
-                self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder.exe')
+            if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder')):
+                self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder')
                 return False
             else:
-                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
+                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder')
 
         fps = self.videoframeratetext.GetValue()
         try:
@@ -2080,11 +2118,11 @@ class ChronoFrame(chronoFrame):
         mencoderpath = self.mencoderpathtext.GetValue()
         if not os.path.isfile(mencoderpath):
             # look for mencoder
-            if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')):
-                self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder.exe')
+            if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder')):
+                self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder')
                 return False
             else:
-                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
+                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder')
 
         # make sure video name has no spaces
         if videobase.find(' ') != -1:
