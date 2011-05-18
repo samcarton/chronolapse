@@ -36,10 +36,13 @@
         - fixed captures at less than 1 second interval -- adds microseconds to filename and timestamp
     @change: 1.0.7
         - fixed bug where audio encoding failed when video filename did NOT have a space in it :o
+    @change: 1.1.0
+        - changed webcam to openCV for linux/mac
+        - added 'default' screenshot and webcam folders
 
 """
 
-VERSION = '1.0.8'
+VERSION = '1.1.0'
 
 import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
 import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
@@ -60,14 +63,6 @@ except ImportError: # if it's not there locally, try the wxPython lib.
 
 import cv
 
-##try:
-##    from VideoCapture import Device
-##except:
-##    if sys.platform.startswith('win'):
-##        print 'VideoCapture library not found. Aborting'
-##        sys.exit(1)
-##    else:
-##        pass
 
 from chronolapsegui import *
 
@@ -297,7 +292,7 @@ class ChronoFrame(chronoFrame):
         'fontdata': wx.FontData(),
 
         'screenshottimestamp':  True,
-        'screenshotsavefolder':     '',
+        'screenshotsavefolder':     'screenshots',
         'screenshotprefix':     'screen_',
         'screenshotformat':     'jpg',
         'screenshotdualmonitor': False,
@@ -309,7 +304,7 @@ class ChronoFrame(chronoFrame):
         'screenshotsubsectionheight': '600',
 
         'webcamtimestamp':  True,
-        'webcamsavefolder':     '',
+        'webcamsavefolder':     'webcam',
         'webcamprefix':     'cam_',
         'webcamformat':     'jpg',
         'webcamresolution': '800, 600',
@@ -588,7 +583,7 @@ class ChronoFrame(chronoFrame):
             configfile = open(os.path.join(self.CHRONOLAPSEPATH, self.CONFIGFILE), 'wb')
 
             # OS specific defaults
-            if sys.platform.lower().startswith('win'):
+            if ONWINDOWS:
                 mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
             else:
                 mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder')
