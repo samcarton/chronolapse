@@ -16,16 +16,26 @@
 
 import subprocess, os, sys, shutil, getopt, re
 
+if sys.platform.startswith('win'):
+    ONWINDOWS = True
+else:
+    ONWINDOWS = False
+
 
 appname = 'Chronolapse'
 shortname = 'chronolapse'
 entrypoint = 'chronolapse.py'
 
 reshackpath = 'c:\\Program Files\\Resource Hacker\\ResHacker.exe'
-iconpath = 'chronolapse.ico'
 
-files = ['manual.html', 'license.txt', 'mencoder.exe', 'helvB08.pil', 'helvB08.png', 'helvetica-10.pil', 'helvetica-10.png', 'chronolapse.ico']
-folders = ['mplayer']
+if ONWINDOWS:
+    files = ['manual.html', 'license.txt', 'mencoder.exe', 'chronolapse.ico' ]
+    folders = ['mplayer','screenshots', 'webcam']
+    iconpath = 'chronolapse.ico'
+else:
+    files = ['manual.html', 'license.txt', 'chronolapse_24.ico']
+    iconpath = 'chronolapse.ico'
+    folders = ['screenshots','webcam']
 
 SCRIPTPATH = os.path.dirname( sys.argv[0] )
 DISTFOLDER = os.path.join( SCRIPTPATH, 'dist%s'%shortname)
@@ -52,7 +62,7 @@ exebuilder = 'cx_freeze'
 for opt, value in optlist:
     if opt == '--pyinstaller':
         # if pyinstaller path seems correct :P
-        if os.path.isfile( value + os.path.sep + 'Makespec.py'):
+        if os.path.isfile( os.path.join(value, 'pyinstaller.py')):
             exebuilder = 'pyinstaller'
             pyinstallerpath = value
             break
@@ -70,7 +80,7 @@ if exebuilder == 'pyinstaller':
     print "RUNNING PYINSTALLER"
 
     # if not on windows, make sure it has proper line endings bc pyinstaller cant handle it
-    if not sys.platform.startswith('win'):
+    if not ONWINDOWS:
         # from http://www.java2s.com/Code/Python/Utility/ChangeLFlineendingstoCRLFUnixtoWindows.htm
         data = open(entrypoint, 'rb').read()
         newdata = re.sub("\r?\n", "\n", data)
@@ -78,28 +88,36 @@ if exebuilder == 'pyinstaller':
         f.write(newdata)
         f.close()
 
-    print "CREATING SPEC FILE"
-    proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "Makespec.py"), shortname, iconpath, entrypoint), shell=True)
+    proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
     proc.communicate()
 
-    print "BUILDING EXECUTABLE"
-    proc = subprocess.Popen( "%s %s"% ( os.path.join(pyinstallerpath, "Build.py"),  '%s.spec'%shortname ), shell=True)
-    proc.communicate()
+##    print "CREATING SPEC FILE"
+##    proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "Makespec.py"), shortname, iconpath, entrypoint), shell=True)
+##    proc.communicate()
+##
+##    print "BUILDING EXECUTABLE"
+##    proc = subprocess.Popen( "%s %s"% ( os.path.join(pyinstallerpath, "Build.py"),  '%s.spec'%shortname ), shell=True)
+##    proc.communicate()
 
     # create dist folder
     os.mkdir( DISTFOLDER)
 
     # copy exe there
-    if os.path.isfile('dist\\%s.exe'%shortname):
-        shutil.move( 'dist\\%s.exe'%shortname, os.path.join(DISTFOLDER, '%s.exe'%shortname))
-    elif os.path.isfile('%s.exe'%shortname):
-        shutil.move( '%s.exe'%shortname, os.path.join(DISTFOLDER, '%s.exe'%shortname))
+    if ONWINDOWS:
+        exename = '%s.exe' % shortname
+    else:
+        exename = shortname
+
+    if os.path.isfile(os.path.join('dist', exename)):
+        shutil.move( os.path.join('dist',exename), os.path.join(DISTFOLDER, exename))
+    elif os.path.isfile(exename):
+        shutil.move( exename, os.path.join(DISTFOLDER, exename))
     else:
         print "Executable not found... Locate and move it manually :D"
 
-    # delete spec if found
-    if os.path.isfile( '%s.spec'%shortname):
-        os.remove( '%s.spec'%shortname)
+##    # delete spec if found
+##    if os.path.isfile( '%s.spec'%shortname):
+##        os.remove( '%s.spec'%shortname)
 
 elif exebuilder == 'cx_freeze':
     print "RUNNING CX_FREEZE"

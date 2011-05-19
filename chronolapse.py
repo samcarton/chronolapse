@@ -39,6 +39,7 @@
     @change: 1.1.0
         - changed webcam to openCV for linux/mac
         - added 'default' screenshot and webcam folders
+        - added a bunch of non-windows options and checks
 
 """
 
@@ -275,8 +276,10 @@ class ChronoFrame(chronoFrame):
         except Exception, e:
             print e
 
-        if os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico')):
+        if ONWINDOWS and os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico')):
             self.SetIcon(wx.Icon(os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico'), wx.BITMAP_TYPE_ICO))
+        elif not ONWINDOWS and os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'chronolapse_24.ico')):
+            self.SetIcon(wx.Icon(os.path.join(self.CHRONOLAPSEPATH, 'chronolapse_24.ico'), wx.BITMAP_TYPE_ICO))
         else:
             self.debug( 'Could not find %s' % os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico'))
 
@@ -586,7 +589,7 @@ class ChronoFrame(chronoFrame):
             if ONWINDOWS:
                 mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder.exe')
             else:
-                mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder')
+                mencoderpath = 'mencoder'
 
             # create defaults
             config = {
@@ -1914,12 +1917,15 @@ class ChronoFrame(chronoFrame):
 
         # check mencoder path
         mencoderpath = self.mencoderpathtext.GetValue()
-        if not os.path.isfile(mencoderpath):
+        if mencoderpath == 'mencoder':
+            self.showWarning('MEncoder path not set', 'Chronolapse uses MEncoder to process video. Either point to MEncoder directly or ensure it is on your path.')
+
+        elif not os.path.isfile(mencoderpath):
             # look for mencoder
             if not os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'mencoder')):
                 self.showWarning('MEncoder Not Found', 'Chronolapse uses MEncoder to process video, but could not find mencoder')
                 return False
-            else:
+            elif ONWINDOWS:
                 mencoderpath = os.path.join(self.CHRONOLAPSEPATH, 'mencoder')
 
         fps = self.videoframeratetext.GetValue()
@@ -2010,6 +2016,7 @@ class ChronoFrame(chronoFrame):
         self.debug("Calling: %s"%command)
 
         self.returncode = None
+        self.mencodererror = 'Unknown'
         mencoderthread = threading.Thread(None, self.runMencoderInThread, 'mencoderthread', (command,))
         mencoderthread.start()
 
@@ -2017,12 +2024,11 @@ class ChronoFrame(chronoFrame):
             time.sleep(.5)
             progressdialog.Pulse()
 
-
         # mencoder error
         if self.returncode > 0:
             progressdialog.Destroy()
 
-            self.showWarning('MEncoder Error', stderr)
+            self.showWarning('MEncoder Error', self.mencodererror)
             return
 
         # move video file to destination folder
@@ -2035,19 +2041,21 @@ class ChronoFrame(chronoFrame):
         dlg.ShowModal()
         dlg.Destroy()
 
-
     def runMencoderInThread(self, command):
         #proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 
         self.debug('Running mencoder in thread')
         #proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-
-        proc = subprocess.Popen(command, close_fds=True)
   #      mencoder mf://*.jpg -mf w=800:h=600:fps=25:type=jpg -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy -o output.avi
+
+        if ONWINDOWS:
+            proc = subprocess.Popen(command, close_fds=True)
+        else:
+            proc = subprocess.Popen(command, close_fds=True, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+
         stdout, stderr = proc.communicate()
-
+        self.mencodererror = stderr
         self.returncode = proc.returncode
-
 
     def audioSourceVideoBrowsePressed(self, event): # wxGlade: chronoFrame.<event_handler>
         path = self.fileBrowser('Select video source',
@@ -2540,7 +2548,10 @@ class TaskBarIcon(wx.TaskBarIcon):
         self.parentApp = parent
         self.MainFrame = MainFrame
         self.wx_id = wx.NewId()
-        self.SetIcon(wx.Icon( os.path.join( os.path.abspath(workingdir), "chronolapse.ico"),wx.BITMAP_TYPE_ICO), 'Chronolapse')
+        if ONWINDOWS and os.path.isfile( os.path.join(os.path.abspath(workingdir), 'chronolapse.ico')):
+            self.SetIcon(wx.Icon( os.path.join( os.path.abspath(workingdir), "chronolapse.ico"),wx.BITMAP_TYPE_ICO), 'Chronolapse')
+        elif not ONWINDOWS and os.path.isfile( os.path.join(os.path.abspath(workingdir), 'chronolapse_24.ico')):
+            self.SetIcon(wx.Icon( os.path.join( os.path.abspath(workingdir), "chronolapse_24.ico"),wx.BITMAP_TYPE_ICO), 'Chronolapse')
         self.CreateMenu()
 
     def toggle_window_visibility(self, event):
