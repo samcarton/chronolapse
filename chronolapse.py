@@ -122,6 +122,7 @@ class WebcamConfigDialog(webcamConfigDialog):
             dlg.ShowModal()
             dlg.Destroy()
 
+
 class WebcamPreviewDialog(webcamPreviewDialog):
 
     def __init__(self, *args, **kwargs):
@@ -150,7 +151,14 @@ class WebcamPreviewDialog(webcamPreviewDialog):
     def callback(self):
         try:
             path = self.parent.takeWebcam(os.path.basename(self.temppath), os.path.dirname(self.temppath), '')
-            bitmap = wx.Bitmap(path, wx.BITMAP_TYPE_JPEG)
+
+            # try this so WX doesnt freak out if the file isnt a bitmap
+            pilimage = Image.open(path)
+            myWxImage = wx.EmptyImage( pilimage.size[0], pilimage.size[1] )
+            myWxImage.SetData( pilimage.convert( 'RGB' ).tostring() )
+            bitmap = myWxImage.ConvertToBitmap()
+
+            #bitmap = wx.Bitmap(path, wx.BITMAP_TYPE_JPEG)
             self.previewbitmap.SetBitmap(bitmap)
             self.previewbitmap.CenterOnParent()
         except Exception, e:
