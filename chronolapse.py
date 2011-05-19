@@ -258,6 +258,9 @@ class ChronoFrame(chronoFrame):
         self.VERSIONCHECKPATH = 'http://keeyai.com/versioncheck.php?application=chronolapse'
         self.UPDATECHECKFREQUENCY = 604800      # 1 week, in seconds
 
+        # fill in codecs available
+        self.videocodeccombo.SetItems(['mpeg4', 'mpeg2video', 'wmv1', 'wmv2', 'mjpeg', 'h263p'])
+
         # save file path
         self.CHRONOLAPSEPATH = os.path.dirname( os.path.abspath(sys.argv[0]))
 
@@ -927,6 +930,8 @@ class ChronoFrame(chronoFrame):
             micro = str(now - math.floor(now))[0:4]
             stamp = stamp + micro
 
+            # TODO: try to write timestamp out with PIL or something else
+            # this *might* be the cause of weird ubuntu errors
             mark = (20, 30)
             font = cv.InitFont(cv.CV_FONT_HERSHEY_COMPLEX, 0.75, 0.75, 0.0, 2, cv.CV_AA)
             cv.PutText(im,stamp,mark,font,cv.RGB(0,0,0))
@@ -2020,8 +2025,8 @@ class ChronoFrame(chronoFrame):
 ##         mf://%s -mf w=%d:h=%d:fps=%s:type=%s -ovc lavc -lavcopts vcodec=%s:mbd=2:trell %s -oac copy -o %s' % (
 ##        path, width, height, fps, imagetype, codec, format, outfile ))
 
-        command = '"%s" mf://%s -mf fps=%s -ovc lavc -lavcopts vcodec=%s -o %s' % (
-        mencoderpath, path, fps, codec, outfile )
+        command = '"%s" mf://%s -mf fps=%s -ovc lavc -lavcopts vcodec=%s %s -o %s' % (
+                    mencoderpath, path, fps, codec, format, outfile )
 
         self.debug("Calling: %s"%command)
 
@@ -2038,7 +2043,7 @@ class ChronoFrame(chronoFrame):
         if self.returncode > 0:
             progressdialog.Destroy()
 
-            self.showWarning('MEncoder Error', self.mencodererror)
+            self.showWarning('MEncoder Error', "Error while encoding video. Check the MEncoder console or try a different codec")
             return
 
         # move video file to destination folder
@@ -2058,14 +2063,18 @@ class ChronoFrame(chronoFrame):
         #proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
   #      mencoder mf://*.jpg -mf w=800:h=600:fps=25:type=jpg -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy -o output.avi
 
-        if ONWINDOWS:
-            proc = subprocess.Popen(command, close_fds=True)
-        else:
-            proc = subprocess.Popen(command, close_fds=True, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        try:
+            if ONWINDOWS:
+                proc = subprocess.Popen(command, close_fds=True)
+            else:
+                proc = subprocess.Popen(command, close_fds=True, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 
-        stdout, stderr = proc.communicate()
-        self.mencodererror = stderr
-        self.returncode = proc.returncode
+            stdout, stderr = proc.communicate()
+            self.mencodererror = stderr
+            self.returncode = proc.returncode
+        except Exception, e:
+            self.mencodererror = repr(e)
+            self.returncode = 1
 
     def audioSourceVideoBrowsePressed(self, event): # wxGlade: chronoFrame.<event_handler>
         path = self.fileBrowser('Select video source',
