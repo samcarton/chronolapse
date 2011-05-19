@@ -16,6 +16,7 @@
 
 import subprocess, os, sys, shutil, getopt, re
 
+
 if sys.platform.startswith('win'):
     ONWINDOWS = True
 else:
@@ -54,10 +55,11 @@ print ' '*50
 print "%s EXE Generator"%appname
 print "-"*50
 # parse command line
-optlist, args = getopt.getopt(sys.argv[1:], [], ['pyinstaller='])
+optlist, args = getopt.getopt(sys.argv[1:], 'w', ['pyinstaller='])
 
 # default to cx_freeze
 exebuilder = 'cx_freeze'
+noconsole=True
 
 for opt, value in optlist:
     if opt == '--pyinstaller':
@@ -69,6 +71,8 @@ for opt, value in optlist:
         else:
             print "PyInstaller directory seems invalid. Falling back to cx_Freeze"
 
+    elif opt == '-w':
+        noconsole = False
 
 print "DELETING OLD BUILD AND DIST FOLDERS"
 if os.path.exists( DISTFOLDER):
@@ -88,7 +92,10 @@ if exebuilder == 'pyinstaller':
         f.write(newdata)
         f.close()
 
-    proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
+    if noconsole:
+        proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
+    else:
+        proc = subprocess.Popen( "%s -F -X -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
     proc.communicate()
 
 ##    print "CREATING SPEC FILE"

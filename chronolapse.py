@@ -49,6 +49,9 @@ import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
 import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
 import wx.lib.masked as masked
 
+import cv, numpy
+
+
 if sys.platform.startswith('win'):
     ONWINDOWS = True
     import win32con, wxkeycodes
@@ -62,7 +65,6 @@ try:
 except ImportError: # if it's not there locally, try the wxPython lib.
     import wx.lib.agw.knobctrl as KC
 
-import cv
 
 
 from chronolapsegui import *
