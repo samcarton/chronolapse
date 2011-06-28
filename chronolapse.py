@@ -44,6 +44,7 @@
         - fixed bug on linux when coming back from the tray
         - added some openCV code for linux/mac but it doesn't seem to work so webcams are disabled on non-windows systems
         - added rename tab for renaming the captured files into sequential integer format (issue #20)
+        - removed format option and added some codecs
 
 """
 
@@ -288,7 +289,10 @@ class ChronoFrame(chronoFrame):
         self.UPDATECHECKFREQUENCY = 604800      # 1 week, in seconds
 
         # fill in codecs available
-        self.videocodeccombo.SetItems(['mpeg4', 'mpeg2video', 'wmv1', 'wmv2', 'mjpeg', 'h263p'])
+        self.videocodeccombo.SetItems(['mpeg4', 'msmpeg4', 'msmpeg4v2', 'wmv1', 'mjpeg', 'h263p', 'uncompressed'])
+
+        # fill in formats
+        #self.videoformatcombo.SetItems(['divx4', 'xvid', 'ffmpeg', 'msmpeg4'])
 
         # save file path
         self.CHRONOLAPSEPATH = os.path.dirname( os.path.abspath(sys.argv[0]))
@@ -560,7 +564,7 @@ class ChronoFrame(chronoFrame):
             try:
                 self.videosourcetext.SetValue(config['videosourcefolder'])
                 self.videodestinationtext.SetValue(config['videooutputfolder'])
-                self.videoformatcombo.SetStringSelection(config['videoformat'])
+                #self.videoformatcombo.SetStringSelection(config['videoformat'])
                 self.videocodeccombo.SetStringSelection(config['videocodec'])
                 self.videoframeratetext.SetValue(config['videoframerate'])
                 self.mencoderpathtext.SetValue(config['mencoderpath'])
@@ -730,7 +734,7 @@ class ChronoFrame(chronoFrame):
 
                 'videosourcefolder':    self.videosourcetext.GetValue(),
                 'videooutputfolder':    self.videodestinationtext.GetValue(),
-                'videoformat':          self.videoformatcombo.GetStringSelection(),
+                #'videoformat':          self.videoformatcombo.GetStringSelection(),
                 'videocodec':           self.videocodeccombo.GetStringSelection(),
                 'videoframerate':       self.videoframeratetext.GetValue(),
                 'mencoderpath':         self.mencoderpathtext.GetValue(),
@@ -2051,26 +2055,27 @@ class ChronoFrame(chronoFrame):
             return False
 
         # get video type from select box
-        format = '-of %s' % self.videoformatcombo.GetStringSelection()
+        #format = '-of %s' % self.videoformatcombo.GetStringSelection()
 
         # get codec from select box
         codec = self.videocodeccombo.GetStringSelection()
 
         # get output file name  ---  create in source folder then move bc of ANOTHER mencoder bug
         timestamp = time.strftime('%Y-%m-%d_%H-%M-%S')
+        outextension = 'avi'
 
-        if (os.path.isfile(os.path.join(destfolder, 'timelapse_%s.%s' % (timestamp, self.videoformatcombo.GetStringSelection())))
-               or os.path.isfile( os.path.join(sourcefolder, 'timelapse_%s.%s' % (timestamp, self.videoformatcombo.GetStringSelection())))):
+        if (os.path.isfile(os.path.join(destfolder, 'timelapse_%s.%s' % (timestamp, outextension)))
+               or os.path.isfile( os.path.join(sourcefolder, 'timelapse_%s.%s' % (timestamp, outextension)))):
 
             count = 2
-            while(os.path.isfile(os.path.join(destfolder, 'timelapse_%s_%d.%s' % (timestamp, count, self.videoformatcombo.GetStringSelection())))
-               or os.path.isfile( os.path.join(sourcefolder, 'timelapse_%s_%d.%s' % (timestamp, count, self.videoformatcombo.GetStringSelection())))):
+            while(os.path.isfile(os.path.join(destfolder, 'timelapse_%s_%d.%s' % (timestamp, count, outextension)))
+               or os.path.isfile( os.path.join(sourcefolder, 'timelapse_%s_%d.%s' % (timestamp, count, outextension)))):
                 count += 1
 
-            outfile = 'timelapse_%s_%d.%s' % (timestamp, count, self.videoformatcombo.GetStringSelection())
+            outfile = 'timelapse_%s_%d.%s' % (timestamp, count, outextension)
 
         else:
-            outfile = 'timelapse_%s.%s' % (timestamp, self.videoformatcombo.GetStringSelection())
+            outfile = 'timelapse_%s.%s' % (timestamp, outextension)
 
         # change cwd to image folder to stop mencoder bug
         try:
@@ -2086,9 +2091,15 @@ class ChronoFrame(chronoFrame):
         # run mencoder with options from GUI
 ##         mf://%s -mf w=%d:h=%d:fps=%s:type=%s -ovc lavc -lavcopts vcodec=%s:mbd=2:trell %s -oac copy -o %s' % (
 ##        path, width, height, fps, imagetype, codec, format, outfile ))
+        # http://web.njit.edu/all_topics/Prog_Lang_Docs/html/mplayer/encoding.html
 
-        command = '"%s" mf://%s -mf fps=%s -ovc lavc -lavcopts vcodec=%s %s -o %s' % (
-                    mencoderpath, path, fps, codec, format, outfile )
+##        if codec == 'uncompressed':
+##            command = '"%s" mf://%s -mf fps=%s -ovc rawrgb -o %s' % (
+##                    mencoderpath, path, fps, outfile )
+##            command = '"%s" mf://fps=%s:type=png  -ovc rawrgb -o %s \*.png' % (mencoderpath, fps, outfile)
+##        else:
+        command = '"%s" mf://%s -mf fps=%s-ovc lavc -lavcopts vcodec=%s -o %s' % (
+                    mencoderpath, path, fps, codec, outfile )
 
         self.debug("Calling: %s"%command)
 
