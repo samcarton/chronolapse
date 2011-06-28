@@ -1,4 +1,12 @@
 <html>
+<head>
+<style>
+ h3 { text-decoration: underline; }
+ p { margin-left: 10px; }
+ .fineprint { font-size: 60%;}
+
+</style>
+</head>
 <body>
 <h2><b>Welcome to Chronolapse</b></h2>
 
@@ -30,8 +38,8 @@ before the next capture by the blue bar at the bottom; when it fills all the way
 another capture is saved.
 
 Note: The webcam library is only supported on windows, so you cannot use webcam captures
-outside of windows. All the other functionality works. If someone out there has experience
-with a good linux/mac webcam lib (video4linux?), let me know.</p>
+outside of windows. All the other functionality works. I'm currently working on a linux/mac
+solution but the options out there are limited.</p>
 
 <p>Item Overview</p>
 <ul>
@@ -156,12 +164,21 @@ need more control over the dubbing process, you should use MEncoder directly.</p
     <li>Add Audio: Press this to begin dubbing</li>
 </ul>
 
+<h3>Rename</h3>
+<p>Chronolapse saves captures with the timestamp as the filename to make it easy to
+find certain moments in a capture as well as for annotation post processing. MEncoder,
+the encoding option chronolapse has built in, is fine with this, but some encoders
+require a folder of images named in sequential integer format (0001, 0002, 0003, etc).</p>
+<p>You can convert from the timestamp format (or any alphabetical format) to sequential
+integers using the Rename tab. Select your source folder and your output folder and
+hit rename. Remember to do this at the very end of the process as it will break annotations.</p>
+
 <h3>About</h3>
 <p>Chronolapse was written by Collin 'Keeyai' Green (http://keeyai.com) and released
 under the MIT license, so it is free to use for pretty much whatever you want. As
 always, if you use the code, a link back is nice and if you are using it commercially
 a link back is awesome. :)</p>
-<p>Please send feedback, comments, bug reports, questions, etc, to chronolapse@keeyai.com. I
+<p>Please post feedback, comments, bug reports, questions, etc, to http://code.google.com/p/chronolapse/. I
 always love to hear from people using my apps, and you guys usually have better
 ideas for features than I do. </p>
 
@@ -171,5 +188,6 @@ ideas for features than I do. </p>
     <li>-v / -q:  increases/decreases the verbosity</li>
     <li>-a: start capturing immediately</li>
 </ul>
+
 </body>
 </html>

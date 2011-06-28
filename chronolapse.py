@@ -36,27 +36,39 @@
         - fixed captures at less than 1 second interval -- adds microseconds to filename and timestamp
     @change: 1.0.7
         - fixed bug where audio encoding failed when video filename did NOT have a space in it :o
-    @change: 1.1.0
-        - changed webcam to openCV for linux/mac
+    @change: 1.0.8
         - added 'default' screenshot and webcam folders
         - added a bunch of non-windows options and checks
+        - added code to automatically un-check the webcam box if no cam found
+        - added code to try to initialize the webcam with default settings if checked but not configured
+        - fixed bug on linux when coming back from the tray
+        - added some openCV code for linux/mac but it doesn't seem to work so webcams are disabled on non-windows systems
+        - added rename tab for renaming the captured files into sequential integer format (issue #20)
 
 """
 
-VERSION = '1.1.0'
+VERSION = '1.0.8'
 
 import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
 import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
 import wx.lib.masked as masked
 
-import cv, numpy
 
 
 if sys.platform.startswith('win'):
     ONWINDOWS = True
     import win32con, wxkeycodes
+    import cv
+
+    try:
+        from VideoCapture import Device
+    except:
+        print 'VideoCapture library not found. Aborting'
+        sys.exit(1)
+
 else:
     ONWINDOWS = False
+    import cv, numpy
 
 from PIL import Image
 
@@ -100,11 +112,21 @@ class WebcamConfigDialog(webcamConfigDialog):
         try:
             if self.GetParent().initCam():
                 self.hascam = True
+                self.GetParent().debug('Found Camera')
+
+                if ONWINDOWS:
+                    try:
+                        self.cam.displayCapturePinProperties()
+                    except:
+                        pass
+
         except Exception, e:
             self.GetParent().showWarning('No Webcam Found', 'No webcam found on your system.')
             self.hascam = False
-            self.GetParent().cam = None
             self.GetParent().debug(repr(e))
+
+        if not self.hascam:
+            self.GetParent().webcamcheck.SetValue(False)
 
     def webcamSaveFolderBrowse(self, event):
         # dir browser
@@ -117,10 +139,19 @@ class WebcamConfigDialog(webcamConfigDialog):
 
     def testWebcamPressed(self, event):
         if self.hascam:
+            self.temppath = tempfile.mkstemp('.jpg')[1]
+            self.temppath = self.temppath[:-4]  # takeWebcam automatically appends the extension again
+
             # create a popup with the image
             dlg = WebcamPreviewDialog(self)
             dlg.ShowModal()
             dlg.Destroy()
+
+            # remove the temp file
+            try:
+                os.unlink(self.temppath + '.jpg')
+            except Exception, e:
+                self.GetParent().debug(e)
 
 
 class WebcamPreviewDialog(webcamPreviewDialog):
@@ -130,20 +161,14 @@ class WebcamPreviewDialog(webcamPreviewDialog):
         self.parent = self.GetParent().GetParent()
         self.timer = Timer(self.callback)
         self.timer.Start(250)
-        self.temppath = tempfile.mkstemp('.jpg')[1]
-        self.temppath = self.temppath[:-4]  # takeWebcam automatically appends the extension again
+
+        self.temppath = self.GetParent().temppath
 
         self.previewokbutton.Bind(wx.EVT_BUTTON, self.close)
 
     def close(self, event=None):
         self.timer.Stop()
-        # remove the temp file
-        try:
-            time.sleep(1)
-            os.unlink(self.temppath + '.jpg')
-        except Exception, e:
-            self.parent.debug(e)
-
+        self.previewbitmap.SetBitmap(wx.NullBitmap)
         del self.timer
         if event:
             event.Skip()
@@ -152,18 +177,22 @@ class WebcamPreviewDialog(webcamPreviewDialog):
         try:
             path = self.parent.takeWebcam(os.path.basename(self.temppath), os.path.dirname(self.temppath), '')
 
-            # try this so WX doesnt freak out if the file isnt a bitmap
-            pilimage = Image.open(path)
-            myWxImage = wx.EmptyImage( pilimage.size[0], pilimage.size[1] )
-            myWxImage.SetData( pilimage.convert( 'RGB' ).tostring() )
-            bitmap = myWxImage.ConvertToBitmap()
+            if(ONWINDOWS):
+                bitmap = wx.Bitmap(path, wx.BITMAP_TYPE_JPEG)
+            else:
+                # try this so WX doesnt freak out if the file isnt a bitmap
+                pilimage = Image.open(path)
+                myWxImage = wx.EmptyImage( pilimage.size[0], pilimage.size[1] )
+                myWxImage.SetData( pilimage.convert( 'RGB' ).tostring() )
+                bitmap = myWxImage.ConvertToBitmap()
 
-            #bitmap = wx.Bitmap(path, wx.BITMAP_TYPE_JPEG)
             self.previewbitmap.SetBitmap(bitmap)
             self.previewbitmap.CenterOnParent()
+
         except Exception, e:
             self.parent.debug(repr(e))
             pass
+
 
 class Timer(wx.Timer):
     """Timer class"""
@@ -293,6 +322,11 @@ class ChronoFrame(chronoFrame):
             self.SetIcon(wx.Icon(os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico'), wx.BITMAP_TYPE_ICO))
         elif not ONWINDOWS and os.path.isfile( os.path.join(self.CHRONOLAPSEPATH, 'chronolapse_24.ico')):
             self.SetIcon(wx.Icon(os.path.join(self.CHRONOLAPSEPATH, 'chronolapse_24.ico'), wx.BITMAP_TYPE_ICO))
+
+            # disable webcams for now
+            self.webcamcheck.Disable()
+            self.configurewebcambutton.Disable()
+
         else:
             self.debug( 'Could not find %s' % os.path.join(self.CHRONOLAPSEPATH, 'chronolapse.ico'))
 
@@ -770,15 +804,31 @@ class ChronoFrame(chronoFrame):
 
     def initCam(self, devnum=0):
         if self.cam is None:
-            try:
-                self.cam = cv.CaptureFromCAM(devnum)
-                if not self.cam:
-                    self.cam = None
-                    self.debug('initCam -- failed to initialize camera')
-                else:
+            if ONWINDOWS:
+                try:
+                    self.cam = Device(devnum,0)
+
+                    try:
+                        self.cam.setResolution(640, 480)
+                    except:
+                        pass
+
                     return True
-            except:
-                self.debug('initCam -- failed to initialize camera')
+                except:
+                    self.debug('initCam -- failed to initialize camera')
+                    self.showWarning('No Webcam Found', 'No webcam found on your system')
+                    self.cam = None
+                return False
+            else:
+                try:
+                    self.cam = cv.CaptureFromCAM(devnum)
+                    if not self.cam:
+                        self.cam = None
+                        self.debug('initCam -- failed to initialize camera')
+                    else:
+                        return True
+                except:
+                    self.debug('initCam -- failed to initialize camera')
         return False
 
     def saveScreenshot(self, filename):
@@ -901,43 +951,54 @@ class ChronoFrame(chronoFrame):
 
         if self.cam is None:
             self.debug('takeWebcam called with no camera')
-            return False
+            try:
+                self.initCam()
+            except:
+                return False
 
         filepath = os.path.join(folder,"%s%s.%s" % (prefix, filename, format))
 
-        # JohnColburn says you need to grab a bunch of frames to underflow
-        # the buffer to have a time-accurate frame
-        camera = self.cam
-        cv.GrabFrame(camera)
-##        cv.GrabFrame(camera)
-##        cv.GrabFrame(camera)
-##        cv.GrabFrame(camera)
-##        cv.GrabFrame(camera)
-        im = cv.RetrieveFrame(camera)
+        if ONWINDOWS:
+            if usetimestamp:
+                self.cam.saveSnapshot(filepath, quality=80, timestamp=1)
+            else:
+                self.cam.saveSnapshot(filepath, quality=80, timestamp=0)
 
-        if im is False:
-            self.debug('Error - could not get frame from camera')
-            return False
 
-        #cv.Flip(im, None, 1)
+        else:
+            # JohnColburn says you need to grab a bunch of frames to underflow
+            # the buffer to have a time-accurate frame
+            camera = self.cam
+            cv.GrabFrame(camera)
+    ##        cv.GrabFrame(camera)
+    ##        cv.GrabFrame(camera)
+    ##        cv.GrabFrame(camera)
+    ##        cv.GrabFrame(camera)
+            im = cv.RetrieveFrame(camera)
 
-        # write timestamp as necessary
-        if usetimestamp:
+            if im is False:
+                self.debug('Error - could not get frame from camera')
+                return False
 
-            # build timestamp
-            stamp = time.strftime(self.TIMESTAMPFORMAT)
-            now = time.time()
-            micro = str(now - math.floor(now))[0:4]
-            stamp = stamp + micro
+            #cv.Flip(im, None, 1)
 
-            # TODO: try to write timestamp out with PIL or something else
-            # this *might* be the cause of weird ubuntu errors
-            mark = (20, 30)
-            font = cv.InitFont(cv.CV_FONT_HERSHEY_COMPLEX, 0.75, 0.75, 0.0, 2, cv.CV_AA)
-            cv.PutText(im,stamp,mark,font,cv.RGB(0,0,0))
+            # write timestamp as necessary
+            if usetimestamp:
 
-        self.debug('Saving image to %s' % filepath)
-        cv.SaveImage(filepath, im)
+                # build timestamp
+                stamp = time.strftime(self.TIMESTAMPFORMAT)
+                now = time.time()
+                micro = str(now - math.floor(now))[0:4]
+                stamp = stamp + micro
+
+                # TODO: try to write timestamp out with PIL or something else
+                # this *might* be the cause of weird ubuntu errors
+                mark = (20, 30)
+                font = cv.InitFont(cv.CV_FONT_HERSHEY_COMPLEX, 0.75, 0.75, 0.0, 2, cv.CV_AA)
+                cv.PutText(im,stamp,mark,font,cv.RGB(0,0,0))
+
+            self.debug('Saving image to %s' % filepath)
+            cv.SaveImage(filepath, im)
 
         return filepath
 
@@ -996,24 +1057,25 @@ class ChronoFrame(chronoFrame):
     def webcamConfigurePressed(self, event): # wxGlade: chronoFrame.<event_handler>
         dlg = WebcamConfigDialog(self)
 
-        # set current options in dlg
-        dlg.webcamtimestampcheck.SetValue(self.options['webcamtimestamp'])
-        dlg.webcamresolutioncombo.SetStringSelection(self.options['webcamresolution'])
-        dlg.webcamprefixtext.SetValue(self.options['webcamprefix'])
-        dlg.webcamsavefoldertext.SetValue(self.options['webcamsavefolder'])
-        dlg.webcamformatcombo.SetStringSelection(self.options['webcamformat'])
+        if dlg.hascam:
+            # set current options in dlg
+            dlg.webcamtimestampcheck.SetValue(self.options['webcamtimestamp'])
+            dlg.webcamresolutioncombo.SetStringSelection(self.options['webcamresolution'])
+            dlg.webcamprefixtext.SetValue(self.options['webcamprefix'])
+            dlg.webcamsavefoldertext.SetValue(self.options['webcamsavefolder'])
+            dlg.webcamformatcombo.SetStringSelection(self.options['webcamformat'])
 
-        if dlg.ShowModal() == wx.ID_OK:
+            if dlg.ShowModal() == wx.ID_OK:
 
-            # save dialog info
-            self.options['webcamtimestamp'] = dlg.webcamtimestampcheck.IsChecked()
-            self.options['webcamresolution'] = dlg.webcamresolutioncombo.GetStringSelection()
-            self.options['webcamprefix'] = dlg.webcamprefixtext.GetValue()
-            self.options['webcamsavefolder'] = dlg.webcamsavefoldertext.GetValue()
-            self.options['webcamformat'] = dlg.webcamformatcombo.GetStringSelection()
+                # save dialog info
+                self.options['webcamtimestamp'] = dlg.webcamtimestampcheck.IsChecked()
+                self.options['webcamresolution'] = dlg.webcamresolutioncombo.GetStringSelection()
+                self.options['webcamprefix'] = dlg.webcamprefixtext.GetValue()
+                self.options['webcamsavefolder'] = dlg.webcamsavefoldertext.GetValue()
+                self.options['webcamformat'] = dlg.webcamformatcombo.GetStringSelection()
 
-            # save to file
-            self.saveConfig()
+                # save to file
+                self.saveConfig()
 
         dlg.Destroy()
 
@@ -2560,6 +2622,69 @@ You can download the new version at:
  #       except:
   #          pass
 
+    def convertSourceBrowsePressed(self, event=None):
+        path = self.dirBrowser('Select source capture folder',
+                    self.convertsourcetext.GetValue())
+
+        if path != '':
+            self.convertsourcetext.SetValue(path)
+
+            if not os.access( path, os.R_OK):
+                self.showWarning("Permission Error",
+                    'Error: the source path %s is not readable. Please set read permissions and try again.'%path)
+
+    def convertOutputBrowsePressed(self, event=None):
+        path = self.dirBrowser('Select save folder for images', self.convertoutputtext.GetValue())
+
+        if path != '':
+            self.convertoutputtext.SetValue(path)
+
+            if not os.access( path, os.W_OK):
+                self.showWarning("Permission Error",
+                    'Error: the output path %s is not writable. Please set write permissions and try again.'%path)
+
+    def convertFilesPressed(self, event=None):
+        source = self.convertsourcetext.GetValue()
+        output = self.convertoutputtext.GetValue()
+
+        if source == '':
+            self.showWarning('Source Folder Required', 'Please select a source folder containing your captures you want renamed')
+        elif not os.access(source, os.R_OK):
+            self.showWarning("Permission Error", 'Error: the source path %s is not readable. Please set read permissions and try again.'%source)
+        elif output == '':
+            self.showWarning('Output Folder Required', 'Please select an output folder for the renamed captures')
+        elif not os.access(output, os.W_OK):
+            self.showWarning("Permission Error", 'Error: the output path %s is not writable. Please set write permissions and try again.'%output)
+        elif source == output:
+            self.showWarning("Headache Protection", 'Error: the source and output paths are the same. Please select a different output folder.')
+        else:
+            # start at one
+            counter = 1
+
+            # get the files from the folder
+            files = os.listdir(source)
+
+            # get just our desired files
+            imagefiles = []
+            for f in files:
+                if f.endswith(('jpg','JPG','jpeg','JPEG','png','PNG','gif','GIF')):
+                    imagefiles.append(f)
+
+            # calculate the filename padding necessary based on number of files
+            padding = int(round( math.log( len(imagefiles), 10))) + 1
+            padding = max(4, padding)
+
+            # process the files
+            for f in imagefiles:
+
+                newname = "%s%s" % (str(counter).rjust(padding, '0'), os.path.splitext(f)[1])
+                shutil.copy( os.path.join(source,f), os.path.join(output, newname))
+                counter += 1
+
+            dlg = wx.MessageDialog(self,"%d files renamed"%(counter-1), "Renaming Complete",wx.OK | wx.ICON_INFORMATION)
+            dlg.ShowModal()
+            dlg.Destroy()
+
 class TaskBarIcon(wx.TaskBarIcon):
 
     def __init__(self, parent, MainFrame, workingdir):
@@ -2589,16 +2714,31 @@ class TaskBarIcon(wx.TaskBarIcon):
         self.MainFrame.Raise()
         self.menu.FindItemById(self.wx_id).SetText("Minimize")
 
+    def iconized(self, event):
+        # bound on non-windows only
+        if self.MainFrame.IsIconized():
+            #print "Main Frame Is Iconized"
+            self.menu.FindItemById(self.wx_id).SetText("Restore")
+            self.MainFrame.Show(False)
+        else:
+            #print "Main Frame Is Not Iconized"
+            self.menu.FindItemById(self.wx_id).SetText("Minimize")
+            self.MainFrame.Show(True)
+            self.MainFrame.Raise()
+
     def CreateMenu(self):
         self.Bind(wx.EVT_TASKBAR_RIGHT_UP, self.ShowMenu)
         self.Bind(wx.EVT_TASKBAR_LEFT_DCLICK, self.toggle_window_visibility)
         self.Bind(wx.EVT_MENU, self.toggle_window_visibility, id=self.wx_id)
         self.Bind(wx.EVT_MENU, self.MainFrame.iconClose, id=wx.ID_EXIT)
-        self.MainFrame.Bind(wx.EVT_ICONIZE, self.set_window_visible_off)
+        if ONWINDOWS:
+            self.MainFrame.Bind(wx.EVT_ICONIZE, self.set_window_visible_off)
+        else:
+            self.MainFrame.Bind(wx.EVT_ICONIZE, self.iconized)
         self.menu=wx.Menu()
         self.menu.Append(self.wx_id, "Minimize","...")
         self.menu.AppendSeparator()
-        self.menu.Append(wx.ID_EXIT, "Close App")
+        self.menu.Append(wx.ID_EXIT, "Close Chronolapse")
 
     def ShowMenu(self,event):
         self.PopupMenu(self.menu)
