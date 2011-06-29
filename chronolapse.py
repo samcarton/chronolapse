@@ -289,7 +289,7 @@ class ChronoFrame(chronoFrame):
         self.UPDATECHECKFREQUENCY = 604800      # 1 week, in seconds
 
         # fill in codecs available
-        self.videocodeccombo.SetItems(['mpeg4', 'msmpeg4', 'msmpeg4v2', 'wmv1', 'mjpeg', 'h263p', 'uncompressed'])
+        self.videocodeccombo.SetItems(['mpeg4', 'msmpeg4', 'msmpeg4v2', 'wmv1', 'mjpeg', 'h263p'])
 
         # fill in formats
         #self.videoformatcombo.SetItems(['divx4', 'xvid', 'ffmpeg', 'msmpeg4'])
