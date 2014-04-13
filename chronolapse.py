@@ -46,9 +46,11 @@
         - added rename tab for renaming the captured files into sequential integer format (issue #20)
         - removed format option and added some codecs
 
+    @change: 1.0.9
+        - added '-b' command line option to launch without taking focus
 """
 
-VERSION = '1.0.8'
+VERSION = '1.0.9'
 
 import wx, time, datetime, os, sys, shutil, cPickle, tempfile, textwrap
 import math, subprocess, getopt, urllib, urllib2, threading, xml.dom.minidom
@@ -59,11 +61,12 @@ import wx.lib.masked as masked
 if sys.platform.startswith('win'):
     ONWINDOWS = True
     import win32con, wxkeycodes
-    import cv
+    #import cv
 
     try:
         from VideoCapture import Device
-    except:
+    except Exception, e:
+        print e
         print 'VideoCapture library not found. Aborting'
         sys.exit(1)
 
@@ -304,8 +307,9 @@ class ChronoFrame(chronoFrame):
         # get command line options
         self.verbosity = self.NORMAL
         self.autostart = False
+        self.start_in_background = False
         try:
-            optlist, args = getopt.getopt(sys.argv[1:], 'vqa')
+            optlist, args = getopt.getopt(sys.argv[1:], 'vqab')
             for opt in optlist:
                 if opt[0] == '-v':
                     self.verbosity = max(0, min( 2, self.verbosity + 1) )
@@ -314,6 +318,9 @@ class ChronoFrame(chronoFrame):
                 elif opt[0] == '-a':
                     self.autostart = True
                     self.debug('Autostarting', self.VERBOSE)
+
+                elif opt[0] == '-b':
+                    self.start_in_background = True
 
             if self.verbosity == self.VERBOSE:
                 self.debug("Verbosity set to: VERBOSE", self.VERBOSE)
@@ -393,6 +400,14 @@ class ChronoFrame(chronoFrame):
         # autostart
         if self.autostart:
             self.startCapturePressed(None)
+
+    def doShow(self, *args, **kwargs):
+        if self.start_in_background:
+            self.debug("Showing main frame without taking focus")
+            self.ShowWithoutActivating(*args, **kwargs)
+        else:
+            self.debug("Showing main frame")
+            self.Show(*args, **kwargs)
 
     def debug(self, message, verbosity=-1):
         # set default
@@ -818,8 +833,9 @@ class ChronoFrame(chronoFrame):
                         pass
 
                     return True
-                except:
+                except Exception, e:
                     self.debug('initCam -- failed to initialize camera')
+                    self.debug('Exception: %s' % repr(e))
                     self.showWarning('No Webcam Found', 'No webcam found on your system')
                     self.cam = None
                 return False
@@ -2783,5 +2799,5 @@ if __name__ == "__main__":
     wx.InitAllImageHandlers()
     chronoframe = ChronoFrame(None, -1, "")
     app.SetTopWindow(chronoframe)
-    chronoframe.Show()
+    chronoframe.doShow()
     app.MainLoop()

@@ -30,7 +30,9 @@ entrypoint = 'chronolapse.py'
 reshackpath = 'c:\\Program Files\\Resource Hacker\\ResHacker.exe'
 
 if ONWINDOWS:
-    files = ['manual.html', 'license.txt', 'mencoder.exe', 'chronolapse.ico' ]
+    files = ['manual.html', 'license.txt', 'mencoder.exe', 'chronolapse.ico',
+                'helvetica-10.png', 'helvetica-10.pil',
+                'helvB08.png', 'helvB08.pil']
     folders = ['mplayer','screenshots', 'webcam']
     iconpath = 'chronolapse.ico'
 else:
@@ -91,11 +93,17 @@ if exebuilder == 'pyinstaller':
         f = open(entrypoint, 'wb')
         f.write(newdata)
         f.close()
+##
+##    if noconsole:
+##        proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
+##    else:
+##        proc = subprocess.Popen( "%s -F -X -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
 
     if noconsole:
-        proc = subprocess.Popen( "%s -F -X -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
+        proc = subprocess.Popen( "%s -F -w -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
     else:
-        proc = subprocess.Popen( "%s -F -X -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
+        proc = subprocess.Popen( "%s -F -n %s --icon=%s %s"% (os.path.join(pyinstallerpath, "pyinstaller.py"), shortname, iconpath, entrypoint), shell=True)
+
     proc.communicate()
 
 ##    print "CREATING SPEC FILE"
