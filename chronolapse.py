@@ -47,7 +47,7 @@
         - removed format option and added some codecs
 
     @change: 1.0.9
-        - added '-b' command line option to launch without taking focus
+        - added '-b' command line option to launch minimized
 """
 
 VERSION = '1.0.9'
@@ -403,8 +403,9 @@ class ChronoFrame(chronoFrame):
 
     def doShow(self, *args, **kwargs):
         if self.start_in_background:
-            self.debug("Showing main frame without taking focus")
-            self.ShowWithoutActivating(*args, **kwargs)
+            self.debug("Starting minimized")
+            self.TBFrame.set_icon_action_text(True)
+            #self.ShowWithoutActivating(*args, **kwargs)
         else:
             self.debug("Showing main frame")
             self.Show(*args, **kwargs)
@@ -2733,23 +2734,29 @@ class TaskBarIcon(wx.TaskBarIcon):
 
     def set_window_visible_off(self, event):
         self.MainFrame.Show(False)
-        self.menu.FindItemById(self.wx_id).SetText("Restore")
+        self.set_icon_action_text(True)
 
     def set_window_visible_on(self, event):
         self.MainFrame.Iconize(False)
         self.MainFrame.Show(True)
         self.MainFrame.Raise()
-        self.menu.FindItemById(self.wx_id).SetText("Minimize")
+        self.set_icon_action_text(False)
+
+    def set_icon_action_text(self, minimized=True):
+        if minimized:
+            self.menu.FindItemById(self.wx_id).SetText("Restore")
+        else:
+            self.menu.FindItemById(self.wx_id).SetText("Minimize")
 
     def iconized(self, event):
         # bound on non-windows only
         if self.MainFrame.IsIconized():
             #print "Main Frame Is Iconized"
-            self.menu.FindItemById(self.wx_id).SetText("Restore")
+            self.set_icon_action_text(True)
             self.MainFrame.Show(False)
         else:
             #print "Main Frame Is Not Iconized"
-            self.menu.FindItemById(self.wx_id).SetText("Minimize")
+            self.set_icon_action_text(False)
             self.MainFrame.Show(True)
             self.MainFrame.Raise()
 
@@ -2791,6 +2798,9 @@ class TaskBarFrame(wx.Frame):
 
     def toggle_window_visibility(self, event):
         self.tbicon.toggle_window_visibility(event)
+
+    def set_icon_action_text(self, minimized):
+        self.tbicon.set_icon_action_text(minimized)
 
 
 # run it!
