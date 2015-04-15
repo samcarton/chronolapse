@@ -865,8 +865,8 @@ class ChronoFrame(chronoFrame):
                 self.options['screenshotsubsectionwidth'] > 0 and
                 self.options['screenshotsubsectionheight'] > 0):
                 rect = wx.Rect(
-                        int(self.options['screenshotsubsectiontop']),
                         int(self.options['screenshotsubsectionleft']),
+                        int(self.options['screenshotsubsectiontop']),
                         int(self.options['screenshotsubsectionwidth']),
                         int(self.options['screenshotsubsectionheight'])
                     )
