@@ -353,6 +353,7 @@ class ChronoFrame(chronoFrame):
         'fontdata': wx.FontData(),
 
         'screenshottimestamp':  True,
+        'screenshottimestampcolour' : wx.Colour(255,255,102),
         'screenshotsavefolder':     'screenshots',
         'screenshotprefix':     'screen_',
         'screenshotformat':     'jpg',
@@ -935,6 +936,8 @@ class ChronoFrame(chronoFrame):
                 micro = str(now - math.floor(now))[0:4]
                 stamp = stamp + micro
 
+            memDC.SetTextForeground(self.options['screenshottimestampcolour'])
+            memDC.SetTextBackground(wx.Colour(0,0,0))
             memDC.DrawText(stamp, 20, rect.height-30)
 
         #Select the Bitmap out of the memory DC by selecting a new
@@ -1049,6 +1052,7 @@ class ChronoFrame(chronoFrame):
         self.subsectionchecked()
 
         dlg.timestampcheck.SetValue(self.options['screenshottimestamp'])
+        dlg.colourpicker.SetColour(self.options['screenshottimestampcolour'])
         dlg.screenshotprefixtext.SetValue(self.options['screenshotprefix'])
         dlg.screenshotsavefoldertext.SetValue(self.options['screenshotsavefolder'])
         dlg.screenshotformatcombo.SetStringSelection(self.options['screenshotformat'])
@@ -1066,6 +1070,7 @@ class ChronoFrame(chronoFrame):
             self.options['screenshotsubsectionheight'] = dlg.subsectionheight.GetValue()
 
             self.options['screenshottimestamp'] = dlg.timestampcheck.IsChecked()
+            self.options['screenshottimestampcolour'] = dlg.colourpicker.GetColour()
             self.options['screenshotprefix'] = dlg.screenshotprefixtext.GetValue()
             self.options['screenshotsavefolder'] = dlg.screenshotsavefoldertext.GetValue()
             self.options['screenshotformat'] = dlg.screenshotformatcombo.GetStringSelection()
